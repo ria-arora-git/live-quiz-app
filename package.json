@@ -7,19 +7,34 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "seed": "ts-node prisma/seed.ts",
-    "postinstall": "prisma generate"
+    "lint:fix": "next lint --fix",
+    "type-check": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "ts-node prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "postinstall": "prisma generate",
+    "docker:build": "docker build -t quiz-app .",
+    "docker:run": "docker-compose up -d",
+    "docker:stop": "docker-compose down"
   },
   "dependencies": {
     "@clerk/nextjs": "^5.0.0",
     "@prisma/client": "^6.13.0",
+    "clsx": "^2.1.1",
+    "critters": "^0.0.23",
     "framer-motion": "^11.0.0",
     "next": "^14.2.31",
     "pg": "^8.11.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "socket.io": "^4.7.5",
-    "socket.io-client": "^4.7.5"
+    "socket.io-client": "^4.7.5",
+    "tailwind-merge": "^3.3.1",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@tailwindcss/forms": "^0.5.10",

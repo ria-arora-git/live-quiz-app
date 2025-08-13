@@ -13,29 +13,53 @@ export default function useSocket(
 
   useEffect(() => {
     if (!roomId) return;
-    fetch("/api/socket");
-    const socket = io({ path: "/api/socket" });
-    socketRef.current = socket;
+    
+    const initSocket = async () => {
+      // Initialize socket endpoint
+      await fetch("/api/socket");
+      
+      const socket = io({ 
+        path: "/api/socket",
+        transports: ["websocket", "polling"],
+        timeout: 60000,
+        forceNew: true,
+      });
+      
+      socketRef.current = socket;
 
-    socket.on("connect", () => {
-      socket.emit("joinRoom", roomId);
-    });
+      socket.on("connect", () => {
+        console.log("Connected to socket server");
+        socket.emit("joinRoom", roomId);
+      });
 
-    socket.on("updateParticipants", (list) => {
-      if (onParticipantsUpdate) onParticipantsUpdate(list);
-    });
+      socket.on("updateParticipants", (list) => {
+        if (onParticipantsUpdate) onParticipantsUpdate(list);
+      });
 
-    socket.on("quizEnded", (payload) => {
-      if (onQuizEnd) onQuizEnd(payload);
-    });
+      socket.on("quizEnded", (payload) => {
+        if (onQuizEnd) onQuizEnd(payload);
+      });
 
-    socket.on("quizStarted", (data) => {
-      if (onQuizStart) onQuizStart(data);
-    });
+      socket.on("quizStarted", (data) => {
+        if (onQuizStart) onQuizStart(data);
+      });
+
+      socket.on("error", (error) => {
+        console.error("Socket error:", error);
+      });
+
+      socket.on("disconnect", (reason) => {
+        console.log("Disconnected from socket server:", reason);
+      });
+    };
+
+    initSocket();
 
     return () => {
-      socket.disconnect();
-      socketRef.current = null;
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     };
   }, [roomId, onParticipantsUpdate, onQuizEnd, onQuizStart]);
 

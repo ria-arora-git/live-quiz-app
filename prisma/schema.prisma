@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {
@@ -17,6 +18,8 @@ model User {
   quizResults      QuizResult[]
   roomLeaderboards RoomLeaderboard[]
   createdRooms     Room[]            @relation("RoomCreator")
+
+  @@map("users")
 }
 
 model Room {
@@ -28,10 +31,16 @@ model Room {
   updatedAt       DateTime          @updatedAt
   questionCount   Int               @default(5)
   timePerQuestion Int               @default(10)
-  creator         User              @relation("RoomCreator", fields: [createdBy], references: [clerkId])
+  isActive        Boolean           @default(true)
+  maxParticipants Int               @default(50)
+  creator         User              @relation("RoomCreator", fields: [createdBy], references: [clerkId], onDelete: Cascade)
   sessions        QuizSession[]
   leaderboards    RoomLeaderboard[]
   questions       Question[]
+
+  @@index([createdBy])
+  @@index([code])
+  @@map("rooms")
 }
 
 model Question {
@@ -41,39 +50,58 @@ model Question {
   options   String[]
   answer    String
   createdAt DateTime @default(now())
-  room      Room     @relation(fields: [roomId], references: [id])
+  order     Int      @default(0)
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+  @@map("questions")
 }
 
 model QuizSession {
   id           String       @id @default(cuid())
   roomId       String
-  room         Room         @relation(fields: [roomId], references: [id])
+  room         Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
   createdAt    DateTime     @default(now())
   participants String[]     @default([])
   currentIndex Int          @default(0)
   isActive     Boolean      @default(false)
+  startedAt    DateTime?
+  endedAt      DateTime?
   results      QuizResult[]
+
+  @@index([roomId])
+  @@index([isActive])
+  @@map("quiz_sessions")
 }
 
 model QuizResult {
-  id        String       @id @default(cuid())
+  id        String      @id @default(cuid())
   userId    String
   sessionId String
-  score     Int          @default(0)
-  createdAt DateTime     @default(now())
-  user      User         @relation(fields: [userId], references: [clerkId])
-  session   QuizSession  @relation(fields: [sessionId], references: [id])
+  score     Int         @default(0)
+  answers   Json        @default("{}")
+  createdAt DateTime    @default(now())
+  user      User        @relation(fields: [userId], references: [clerkId], onDelete: Cascade)
+  session   QuizSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sessionId])
+  @@index([sessionId])
+  @@map("quiz_results")
 }
 
 model RoomLeaderboard {
   id           String   @id @default(cuid())
   roomId       String
   userId       String
-  date         DateTime @default(now())
+  date         String
   dailyScore   Int      @default(0)
   allTimeScore Int      @default(0)
-  room         Room     @relation(fields: [roomId], references: [id])
-  user         User     @relation(fields: [userId], references: [clerkId])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  room         Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [clerkId], onDelete: Cascade)
 
   @@unique([roomId, userId, date])
+  @@index([roomId, date])
+  @@map("room_leaderboards")
 }

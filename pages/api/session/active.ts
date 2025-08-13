@@ -9,19 +9,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const { roomId, sessionId } = req.query;
 
   if (!roomId || typeof roomId !== "string") {
-    return res.status(400).json({ error: "Invalid roomId" });
+    return res.status(400).json({ error: "Room ID is required" });
   }
 
   try {
     let session = null;
 
-    // If sessionId is provided -> fetch exact session
+    // If specific sessionId provided, fetch that session
     if (sessionId && typeof sessionId === "string") {
       session = await prisma.quizSession.findUnique({
         where: { id: sessionId },
         include: {
           room: true,
-          results: { include: { user: true } },
+          results: { 
+            include: { 
+              user: {
+                select: { name: true, email: true, clerkId: true }
+              }
+            } 
+          },
         },
       });
 
@@ -29,46 +35,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "Session not found" });
       }
     } else {
-      // Default: fetch latest active session for the room
+      // Find most recent active session for the room
       session = await prisma.quizSession.findFirst({
         where: { roomId, isActive: true },
         include: {
           room: true,
-          results: { include: { user: true } },
+          results: { 
+            include: { 
+              user: {
+                select: { name: true, email: true, clerkId: true }
+              }
+            } 
+          },
         },
         orderBy: { createdAt: "desc" },
       });
 
-      // Auto-create a session if none exists
       if (!session) {
-        const roomExists = await prisma.room.findUnique({ where: { id: roomId } });
-        if (!roomExists) {
-          return res.status(404).json({ error: "Room not found" });
-        }
-
-        session = await prisma.quizSession.create({
-          data: {
-            roomId,
-            isActive: true,
-            currentIndex: 0,
-            participants: [],
-          },
-          include: {
-            room: true,
-            results: { include: { user: true } },
-          },
-        });
+        return res.status(404).json({ error: "No active session found" });
       }
     }
 
-    // Fetch participant user details
+    // Get participant details
     const participants = await prisma.user.findMany({
       where: { clerkId: { in: session.participants } },
+      select: {
+        id: true,
+        clerkId: true,
+        name: true,
+        email: true,
+      }
     });
 
-    return res.status(200).json({
-      session: { ...session, participants },
-    });
+    // Add participants to session data
+    const sessionWithParticipants = {
+      ...session,
+      participants: participants,
+    };
+
+    return res.status(200).json({ session: sessionWithParticipants });
   } catch (error) {
     console.error("Error in /api/session/active:", error);
     return res.status(500).json({ error: "Internal server error" });

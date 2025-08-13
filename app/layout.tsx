@@ -1,12 +1,20 @@
 import "../styles/globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
+import { Metadata } from "next";
 
-export const metadata = {
-  title: "Neon Quiz Arena",
-  description: "Real-time multiplayer quiz game",
+export const metadata: Metadata = {
+  title: "Live Quiz Arena - Real-time Multiplayer Quiz Game",
+  description: "Compete in real-time quizzes, ace the leaderboard and get brownie points & treats from ACM.",
+  keywords: "quiz, real-time, multiplayer, competition, leaderboard",
+  authors: [{ name: "Quiz Arena Team" }],
+  viewport: "width=device-width, initial-scale=1",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ 
+  children 
+}: { 
+  children: React.ReactNode 
+}) {
   return (
     <ClerkProvider 
       publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
@@ -16,7 +24,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       afterSignUpUrl="/dashboard"
     >
       <html lang="en">
-        <body className="min-h-screen bg-black text-white">
+        <head>
+          <link rel="preconnect" href="https://fonts.googleapis.com" />
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+          <link 
+            href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" 
+            rel="stylesheet" 
+          />
+        </head>
+        <body className="min-h-screen bg-black text-white font-orbitron antialiased">
           {children}
         </body>
       </html>
