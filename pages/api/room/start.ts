@@ -11,104 +11,73 @@ const startQuizSchema = z.object({
 });
 
 export default async function handler(req: NextApiRequest, res: NextApiResponseServerIO) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const { userId } = getAuth(req);
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     const { roomId, questionCount, timePerQuestion } = startQuizSchema.parse(req.body);
+    console.log(`🚀 Starting quiz for room ${roomId} by user ${userId}`);
 
-    // Verify room exists and user is the owner
-    const room = await prisma.room.findUnique({ 
+    const room = await prisma.room.findUnique({
       where: { id: roomId },
-      include: {
-        _count: {
-          select: { questions: true }
-        }
-      }
+      include: { _count: { select: { questions: true } } }
+    });
+    
+    if (!room) return res.status(404).json({ error: "Room not found" });
+    if (room.createdBy !== userId) return res.status(403).json({ error: "Not authorized" });
+    if (room._count.questions === 0) return res.status(400).json({ error: "Add questions first" });
+
+    // Update settings
+    await prisma.room.update({
+      where: { id: roomId },
+      data: {
+        ...(questionCount && { questionCount }),
+        ...(timePerQuestion && { timePerQuestion }),
+      },
     });
 
-    if (!room) {
-      return res.status(404).json({ error: "Room not found" });
-    }
-
-    if (room.createdBy !== userId) {
-      return res.status(403).json({ error: "Not authorized to start this quiz" });
-    }
-
-    if (!room.isActive) {
-      return res.status(400).json({ error: "Room is not active" });
-    }
-
-    // Check if room has questions
-    if (room._count.questions === 0) {
-      return res.status(400).json({ 
-        error: "Cannot start quiz without questions. Please add questions first." 
-      });
-    }
-
-    // Update room settings if provided
-    if (questionCount || timePerQuestion) {
-      await prisma.room.update({
-        where: { id: roomId },
-        data: {
-          ...(questionCount && { questionCount }),
-          ...(timePerQuestion && { timePerQuestion }),
-        },
-      });
-    }
-
-    // End any existing active sessions
+    // End previous sessions
     await prisma.quizSession.updateMany({
-      where: { 
-        roomId, 
-        isActive: true 
-      },
-      data: { 
-        isActive: false, 
-        endedAt: new Date() 
-      },
+      where: { roomId, isActive: true },
+      data: { isActive: false, endedAt: new Date() },
     });
 
-    // Create new quiz session
+    // Create new session
     const session = await prisma.quizSession.create({
-      data: { 
-        roomId, 
-        isActive: true, 
-        participants: [], 
+      data: {
+        roomId,
+        isActive: true,
+        participants: [],
         currentIndex: 0,
         startedAt: new Date(),
       },
-      include: {
-        room: true,
-      }
     });
 
-    // Emit quiz start event to all participants
+    console.log(`✅ Created session ${session.id} for room ${roomId}`);
+
+    // Emit via Socket.IO server directly
     if (res.socket.server.io) {
-      res.socket.server.io.to(roomId).emit("quizStarted", { 
+      console.log(`📡 Emitting quizStarted to room ${roomId} with sessionId ${session.id}`);
+      res.socket.server.io.to(roomId).emit("quizStarted", {
         sessionId: session.id,
         roomId,
         timestamp: session.startedAt?.toISOString(),
       });
+      
+      // Also emit via the startQuiz event for good measure
+      res.socket.server.io.emit("startQuiz", {
+        roomId,
+        sessionId: session.id,
+      });
+    } else {
+      console.error("❌ Socket.IO server not initialized!");
     }
 
     return res.status(200).json({ session });
-  } catch (error) {
-    console.error("Error starting quiz:", error);
-    
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({ 
-        error: "Invalid input", 
-        details: error.errors 
-      });
-    }
-    
+  } catch (err) {
+    console.error("❌ Start Quiz API Error:", err);
     return res.status(500).json({ error: "Failed to start quiz" });
   }
 }

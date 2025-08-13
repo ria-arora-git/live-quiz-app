@@ -9,7 +9,14 @@ import QuizQuestion from "@/components/QuizQuestion";
 import QuizTimer from "@/components/QuizTimer";
 import Leaderboard from "@/components/Leaderboard";
 import LoadingSpinner from "@/components/LoadingSpinner";
-import type { Question } from "@/types/quiz";
+import NeonButton from "@/components/NeonButton";
+
+interface Question {
+  id: string;
+  text: string;
+  options: string[];
+  answer: string;
+}
 
 interface QuizSession {
   id: string;
@@ -32,12 +39,6 @@ interface LeaderboardEntry {
   score: number;
 }
 
-interface UserStats {
-  score: number;
-  correct: number;
-  total: number;
-}
-
 export default function QuizPage({ params }: { params: { roomId: string } }) {
   const { roomId } = params;
   const { isSignedIn, user } = useUser();
@@ -52,7 +53,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
   const [userScore, setUserScore] = useState(0);
   const [quizOver, setQuizOver] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
+  const [userStats, setUserStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [currentAnswer, setCurrentAnswer] = useState<string | null>(null);
@@ -66,7 +67,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
     (payload) => {
       setQuizOver(true);
       setLeaderboard(payload.leaderboard || []);
-      setUserStats(payload.userStats || null);
+      setUserStats(payload.userStats?.[user?.id] || null);
     },
     () => {
       loadQuizData();
@@ -80,12 +81,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       
       const res = await fetch(url);
       if (!res.ok) {
-        if (res.status === 404) {
-          setError("Quiz session not found. Please wait for the host to start the quiz.");
-        } else {
-          throw new Error("Failed to load quiz data");
-        }
-        return;
+        throw new Error("Quiz session not found");
       }
       
       const data = await res.json();
@@ -93,7 +89,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       setParticipants(data.session.participants || []);
       setCurrentIndex(data.session.currentIndex || 0);
 
-      // Load questions
       const qRes = await fetch(`/api/question/list?roomId=${roomId}`);
       if (qRes.ok) {
         const questionsData = await qRes.json();
@@ -118,8 +113,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
     if (!session || quizOver || isHost || !questions[currentIndex]) return;
     
     const question = questions[currentIndex];
-    
-    // Prevent multiple submissions for the same question
     if (answeredQuestions.has(question.id)) return;
     
     setCurrentAnswer(selectedOption);
@@ -159,12 +152,12 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
 
   const handleTimeUp = () => {
     if (!isHost && !answeredQuestions.has(questions[currentIndex]?.id)) {
-      handleAnswerSubmit("", 0); // Submit empty answer when time runs out
+      handleAnswerSubmit("", 0);
     }
     
     setTimeout(() => {
       handleNextQuestion();
-    }, 2000); // Show results for 2 seconds before moving to next question
+    }, 2000);
   };
 
   if (loading) return <LoadingSpinner />;
@@ -176,12 +169,9 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
           <div className="text-6xl mb-6">⚠️</div>
           <h2 className="text-2xl font-bold text-yellow-400 mb-4">Quiz Not Available</h2>
           <p className="text-gray-400 mb-6">{error}</p>
-          <button
-            onClick={() => router.push("/dashboard")}
-            className="bg-neonPink text-black px-6 py-3 rounded-lg font-semibold hover:bg-pink-600 transition"
-          >
+          <NeonButton onClick={() => router.push("/dashboard")}>
             Back to Dashboard
-          </button>
+          </NeonButton>
         </div>
       </div>
     );
@@ -244,7 +234,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                 transition={{ duration: 0.3 }}
                 className="space-y-6"
               >
-                {/* Timer */}
                 <div className="text-center">
                   <QuizTimer
                     key={`${questions[currentIndex].id}-timer`}
@@ -253,7 +242,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                   />
                 </div>
 
-                {/* Question */}
                 <QuizQuestion
                   question={questions[currentIndex]}
                   onAnswer={handleAnswerSubmit}
@@ -318,7 +306,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                 </div>
               )}
 
-              {/* Host Controls */}
               <div className="mt-6 flex justify-center space-x-4">
                 <button
                   onClick={handleNextQuestion}
@@ -344,7 +331,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
               animate={{ opacity: 1, y: 0 }}
               className="space-y-8"
             >
-              {/* Personal Stats for Participants */}
               {!isHost && userStats && (
                 <div className="bg-gradient-to-r from-green-900 to-blue-900 rounded-lg p-6 border border-green-500 text-center">
                   <h2 className="text-3xl font-bold text-green-400 mb-4">Quiz Complete!</h2>
@@ -367,21 +353,19 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                 </div>
               )}
 
-              {/* Leaderboard */}
               <Leaderboard 
                 entries={leaderboard} 
                 title="Final Results"
                 showRanks={true}
               />
 
-              {/* Actions */}
               <div className="text-center space-y-4">
-                <button
+                <NeonButton
                   onClick={() => router.push("/dashboard")}
-                  className="bg-neonPink text-black px-8 py-3 rounded-lg font-semibold hover:bg-pink-600 transition"
+                  className="px-8 py-3"
                 >
                   Back to Dashboard
-                </button>
+                </NeonButton>
                 
                 {isHost && (
                   <div className="space-x-4">

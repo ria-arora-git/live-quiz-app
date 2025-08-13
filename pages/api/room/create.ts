@@ -29,7 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Ensure user exists in database
     let user = await prisma.user.findUnique({ where: { clerkId: userId } });
     if (!user) {
-      const clerkUser = await clerkClient.users.getUser(userId);
+      const clerkUser = await clerkClient().users.getUser(userId);
       user = await prisma.user.create({
         data: {
           clerkId: userId,

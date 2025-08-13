@@ -1,13 +1,20 @@
 import "../styles/globals.css";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Metadata } from "next";
+import { Metadata, Viewport } from "next";
 
 export const metadata: Metadata = {
   title: "Live Quiz Arena - Real-time Multiplayer Quiz Game",
   description: "Compete in real-time quizzes, ace the leaderboard and get brownie points & treats from ACM.",
   keywords: "quiz, real-time, multiplayer, competition, leaderboard",
   authors: [{ name: "Quiz Arena Team" }],
-  viewport: "width=device-width, initial-scale=1",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#000000",
 };
 
 export default function RootLayout({ 

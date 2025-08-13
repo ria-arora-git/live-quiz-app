@@ -14,42 +14,57 @@ export default function useSocket(
   useEffect(() => {
     if (!roomId) return;
     
+    console.log(`🔌 Initializing socket for room: ${roomId}`);
+
     const initSocket = async () => {
-      // Initialize socket endpoint
+      // Initialize socket server
       await fetch("/api/socket");
       
       const socket = io({ 
-        path: "/api/socket",
+        path: "/api/socket", 
         transports: ["websocket", "polling"],
-        timeout: 60000,
+        timeout: 20000,
         forceNew: true,
       });
-      
+
       socketRef.current = socket;
 
       socket.on("connect", () => {
-        console.log("Connected to socket server");
+        console.log(`🟢 Connected to socket server with ID: ${socket.id}`);
         socket.emit("joinRoom", roomId);
       });
 
-      socket.on("updateParticipants", (list) => {
-        if (onParticipantsUpdate) onParticipantsUpdate(list);
+      socket.on("roomJoined", (data) => {
+        console.log(`✅ Successfully joined room ${data.roomId}`);
       });
 
-      socket.on("quizEnded", (payload) => {
-        if (onQuizEnd) onQuizEnd(payload);
+      socket.on("updateParticipants", (list) => {
+        console.log("👥 Participants updated:", list);
+        onParticipantsUpdate?.(list);
       });
 
       socket.on("quizStarted", (data) => {
-        if (onQuizStart) onQuizStart(data);
+        console.log("🎯 QUIZ STARTED EVENT RECEIVED:", data);
+        console.log("🔄 Calling onQuizStart with data:", data);
+        onQuizStart?.(data);
       });
 
-      socket.on("error", (error) => {
-        console.error("Socket error:", error);
+      socket.on("quizEnded", (payload) => {
+        console.log("🏁 Quiz ended:", payload);
+        onQuizEnd?.(payload);
       });
 
       socket.on("disconnect", (reason) => {
-        console.log("Disconnected from socket server:", reason);
+        console.log(`🔴 Disconnected from socket server: ${reason}`);
+      });
+
+      socket.on("error", (error) => {
+        console.error("❌ Socket error:", error);
+      });
+
+      // Listen for any event (debugging)
+      socket.onAny((event, ...args) => {
+        console.log(`📨 Socket event received: ${event}`, args);
       });
     };
 
@@ -57,6 +72,7 @@ export default function useSocket(
 
     return () => {
       if (socketRef.current) {
+        console.log("🔌 Disconnecting socket");
         socketRef.current.disconnect();
         socketRef.current = null;
       }

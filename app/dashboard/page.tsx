@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
@@ -21,26 +21,31 @@ export default function DashboardPage() {
   const [waiting, setWaiting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [joinedRoomId, setJoinedRoomId] = useState<string | null>(null);
 
   const router = useRouter();
   const { user, isLoaded } = useUser();
 
-  // Socket connection for waiting room
+  // Socket connection with detailed logging
   useSocket(
     joinedRoomId || "",
-    (updated) => setParticipants(updated),
+    (updated) => {
+      console.log("📊 Dashboard participants updated:", updated);
+      setParticipants(updated);
+    },
     undefined,
     (data) => {
-      const sid = data.sessionId || sessionId;
-      router.push(`/quiz/${joinedRoomId}?sessionId=${sid}`);
+      console.log("🚀 Dashboard received quizStarted:", data);
+      if (data?.sessionId && joinedRoomId) {
+        console.log(`🔄 Redirecting to: /quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
+        router.push(`/quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
+      } else {
+        console.error("❌ Missing sessionId or joinedRoomId:", { sessionId: data?.sessionId, joinedRoomId });
+      }
     }
   );
 
-  if (!isLoaded) {
-    return <LoadingSpinner />;
-  }
+  if (!isLoaded) return <LoadingSpinner />;
 
   const handleCreateRoom = async () => {
     setLoading(true);
@@ -58,8 +63,10 @@ export default function DashboardPage() {
       }
       
       const data = await res.json();
+      console.log("✅ Room created:", data);
       router.push(`/dashboard/${data.room.id}`);
     } catch (err: any) {
+      console.error("❌ Create room error:", err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -76,14 +83,15 @@ export default function DashboardPage() {
     setError("");
     
     try {
-      // Find room by code
+      console.log(`🔍 Looking for room with code: ${roomCode}`);
+      
       const roomRes = await fetch(`/api/room/by-code?code=${roomCode.toUpperCase()}`);
       if (!roomRes.ok) {
         throw new Error("Room not found");
       }
       const { room } = await roomRes.json();
+      console.log("✅ Found room:", room);
 
-      // Try to join active session
       const joinRes = await fetch("/api/session/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -91,14 +99,15 @@ export default function DashboardPage() {
       });
 
       if (joinRes.ok) {
-        const { sessionId: sid } = await joinRes.json();
-        setSessionId(sid);
+        const { sessionId } = await joinRes.json();
+        console.log("✅ Joined session:", sessionId);
       }
 
-      // Set waiting state
+      console.log(`🎯 Setting up waiting room for room: ${room.id}`);
       setJoinedRoomId(room.id);
       setWaiting(true);
     } catch (err: any) {
+      console.error("❌ Join room error:", err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -106,9 +115,9 @@ export default function DashboardPage() {
   };
 
   const handleBackToDashboard = () => {
+    console.log("🔄 Going back to main dashboard");
     setWaiting(false);
     setJoinedRoomId(null);
-    setSessionId(null);
     setParticipants([]);
     setRoomCode("");
     setError("");
@@ -117,7 +126,6 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white">
       <div className="container mx-auto px-6 py-8">
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -133,7 +141,7 @@ export default function DashboardPage() {
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-red-500 bg-opacity-20 border border-red-500 rounded-lg p-4 mb-6 text-center"
+            className="bg-red-500 bg-opacity-20 border border-red-500 rounded-lg p-4 mb-6 text-center max-w-2xl mx-auto"
           >
             <p className="text-red-300">{error}</p>
           </motion.div>
@@ -142,7 +150,6 @@ export default function DashboardPage() {
         <div className="max-w-4xl mx-auto space-y-8">
           {!waiting ? (
             <>
-              {/* Host Section */}
               <motion.section
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -167,7 +174,6 @@ export default function DashboardPage() {
                 </NeonButton>
               </motion.section>
 
-              {/* Join Section */}
               <motion.section
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -203,7 +209,6 @@ export default function DashboardPage() {
               </motion.section>
             </>
           ) : (
-            // Waiting Room
             <motion.section
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -214,10 +219,13 @@ export default function DashboardPage() {
                 <p className="text-gray-400">
                   Waiting for the host to start the quiz. You'll be redirected automatically.
                 </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  Room ID: {joinedRoomId}
+                </p>
               </div>
 
               <div className="mb-6">
-                <h3 className="text-xl font-semibold mb-4 text-center">
+                <h3 className="text-xl font-semibold mb-4 text-center text-neonCyan">
                   Participants ({participants.length})
                 </h3>
                 {participants.length === 0 ? (
@@ -233,7 +241,7 @@ export default function DashboardPage() {
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.1 }}
-                        className="bg-gray-800 rounded-lg p-3 border border-gray-700"
+                        className="bg-gray-800 rounded-lg p-3 border border-gray-700 hover:border-neonCyan transition-colors"
                       >
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 bg-gradient-to-r from-neonPink to-neonCyan rounded-full flex items-center justify-center text-black font-bold text-sm">

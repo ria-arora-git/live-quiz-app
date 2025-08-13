@@ -34,7 +34,7 @@ interface Participant {
 
 export default function RoomDashboard({ params }: { params: { roomId: string } }) {
   const { roomId } = params;
-  const { isSignedIn, user } = useUser();
+  const { isSignedIn, user, isLoaded } = useUser();
   const router = useRouter();
 
   const [room, setRoom] = useState<Room | null>(null);
@@ -51,10 +51,17 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
 
   useSocket(
     roomId,
-    (updated) => setParticipants(updated)
+    (updated) => setParticipants(updated),
+    undefined,
+    (data) => {
+      if (data?.sessionId) {
+        router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
+      }
+    }
   );
 
   useEffect(() => {
+    if (!isLoaded) return;
     if (!isSignedIn) {
       router.replace("/sign-in");
       return;
@@ -62,17 +69,13 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     
     const loadData = async () => {
       try {
-        // Load room data
         const roomRes = await fetch(`/api/room/${roomId}`);
-        if (!roomRes.ok) {
-          throw new Error("Room not found");
-        }
+        if (!roomRes.ok) throw new Error("Room not found");
         const roomData = await roomRes.json();
         setRoom(roomData.room);
         setQuestionCount(roomData.room.questionCount);
         setTimePerQuestion(roomData.room.timePerQuestion);
 
-        // Load questions
         const questionsRes = await fetch(`/api/question/list?roomId=${roomId}`);
         if (questionsRes.ok) {
           const questionsData = await questionsRes.json();
@@ -86,10 +89,11 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     };
 
     loadData();
-  }, [isSignedIn, roomId, router]);
+  }, [isLoaded, isSignedIn, roomId, router]);
 
   const updateSettings = async () => {
     setSaveLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/room/update", {
         method: "POST",
@@ -97,21 +101,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
         body: JSON.stringify({ roomId, questionCount, timePerQuestion }),
       });
       
-      if (!res.ok) {
-        throw new Error("Failed to update settings");
-      }
-      
-      // Show success feedback
-      const button = document.querySelector('[data-save-button]') as HTMLButtonElement;
-      if (button) {
-        const originalText = button.textContent;
-        button.textContent = "Saved!";
-        button.className = button.className.replace('bg-blue-500', 'bg-green-500');
-        setTimeout(() => {
-          button.textContent = originalText;
-          button.className = button.className.replace('bg-green-500', 'bg-blue-500');
-        }, 2000);
-      }
+      if (!res.ok) throw new Error("Failed to update settings");
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -147,36 +137,14 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     }
   };
 
-  const endQuiz = async () => {
-    if (!confirm("Are you sure you want to end the quiz for all participants?")) {
-      return;
-    }
-    
-    try {
-      await fetch("/api/quiz/end", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId }),
-      });
-      
-      // Redirect to results or dashboard
-      router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.message);
-    }
-  };
-
   const copyRoomCode = () => {
     if (room?.code) {
       navigator.clipboard.writeText(room.code);
-      // Show feedback
-      const button = document.querySelector('[data-copy-button]') as HTMLButtonElement;
-      if (button) {
-        const originalText = button.textContent;
-        button.textContent = "Copied!";
-        setTimeout(() => {
-          button.textContent = originalText;
-        }, 2000);
+      const btn = document.querySelector('[data-copy-button]') as HTMLButtonElement;
+      if (btn) {
+        const original = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => btn.textContent = original, 2000);
       }
     }
   };
@@ -200,7 +168,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white">
       <div className="container mx-auto px-6 py-8">
-        {/* Header */}
         <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -221,14 +188,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
               >
                 Copy Code
               </NeonButton>
-              {isHost && (
-                <button
-                  onClick={endQuiz}
-                  className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors text-sm"
-                >
-                  End Quiz
-                </button>
-              )}
             </div>
           </div>
         </motion.header>
@@ -244,7 +203,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
         )}
 
         <div className="space-y-8">
-          {/* Settings */}
           {isHost && (
             <motion.section
               initial={{ opacity: 0, x: -20 }}
@@ -280,7 +238,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
               <button
                 onClick={updateSettings}
                 disabled={saveLoading}
-                data-save-button
                 className="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-600 text-white px-6 py-2 rounded-lg transition-colors"
               >
                 {saveLoading ? "Saving..." : "Save Settings"}
@@ -288,7 +245,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
             </motion.section>
           )}
 
-          {/* Start Quiz */}
           {isHost && (
             <motion.section
               initial={{ opacity: 0, x: 20 }}
@@ -315,7 +271,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
             </motion.section>
           )}
 
-          {/* Participants */}
           <motion.section
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -357,7 +312,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
             )}
           </motion.section>
 
-          {/* Questions Management */}
           {isHost && (
             <motion.section
               initial={{ opacity: 0, y: 20 }}
@@ -367,13 +321,11 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
             >
               <h2 className="text-2xl font-bold mb-4 text-neonPink">Questions</h2>
               
-              {/* Add Question Form */}
               <AddQuestionForm
                 roomId={roomId}
                 onAdded={(question) => setQuestions((prev) => [...prev, question])}
               />
 
-              {/* Questions List */}
               <div className="mt-6">
                 <h3 className="text-lg font-semibold mb-3">
                   Current Questions ({questions.length})
