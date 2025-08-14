@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 
 export default function useSocket(
@@ -10,27 +10,39 @@ export default function useSocket(
   onQuizStart?: (data: any) => void
 ) {
   const socketRef = useRef<Socket | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
+  const initializeSocket = useCallback(async () => {
     if (!roomId) return;
     
     console.log(`🔌 Initializing socket for room: ${roomId}`);
 
-    const initSocket = async () => {
-      // Initialize socket server
-      await fetch("/api/socket");
+    try {
+      // First ensure the socket server is initialized
+      await fetch("/api/socket", { method: "GET" });
       
+      // Disconnect existing socket if any
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
+
       const socket = io({ 
         path: "/api/socket", 
         transports: ["websocket", "polling"],
         timeout: 20000,
         forceNew: true,
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 5,
+        maxReconnectionAttempts: 5,
       });
 
       socketRef.current = socket;
 
       socket.on("connect", () => {
         console.log(`🟢 Connected to socket server with ID: ${socket.id}`);
+        
+        // Join room after successful connection
         socket.emit("joinRoom", roomId);
       });
 
@@ -38,14 +50,13 @@ export default function useSocket(
         console.log(`✅ Successfully joined room ${data.roomId}`);
       });
 
-      socket.on("updateParticipants", (list) => {
-        console.log("👥 Participants updated:", list);
-        onParticipantsUpdate?.(list);
+      socket.on("updateParticipants", (participants) => {
+        console.log("👥 Participants updated:", participants);
+        onParticipantsUpdate?.(participants);
       });
 
       socket.on("quizStarted", (data) => {
         console.log("🎯 QUIZ STARTED EVENT RECEIVED:", data);
-        console.log("🔄 Calling onQuizStart with data:", data);
         onQuizStart?.(data);
       });
 
@@ -56,6 +67,20 @@ export default function useSocket(
 
       socket.on("disconnect", (reason) => {
         console.log(`🔴 Disconnected from socket server: ${reason}`);
+        
+        // Attempt to reconnect after a delay for certain disconnect reasons
+        if (reason === "io server disconnect" || reason === "transport close") {
+          console.log("🔄 Attempting to reconnect...");
+          reconnectTimeoutRef.current = setTimeout(() => {
+            if (!socket.connected) {
+              socket.connect();
+            }
+          }, 2000);
+        }
+      });
+
+      socket.on("connect_error", (error) => {
+        console.error("❌ Socket connection error:", error);
       });
 
       socket.on("error", (error) => {
@@ -66,18 +91,29 @@ export default function useSocket(
       socket.onAny((event, ...args) => {
         console.log(`📨 Socket event received: ${event}`, args);
       });
-    };
 
-    initSocket();
+    } catch (error) {
+      console.error("❌ Failed to initialize socket:", error);
+    }
+  }, [roomId, onParticipantsUpdate, onQuizEnd, onQuizStart]);
+
+  useEffect(() => {
+    initializeSocket();
 
     return () => {
+      console.log("🔌 Cleaning up socket connection");
+      
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      
       if (socketRef.current) {
-        console.log("🔌 Disconnecting socket");
         socketRef.current.disconnect();
         socketRef.current = null;
       }
     };
-  }, [roomId, onParticipantsUpdate, onQuizEnd, onQuizStart]);
+  }, [initializeSocket]);
 
+  // Return socket reference for manual operations
   return socketRef;
 }

@@ -49,11 +49,16 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
 
   const isHost = room?.createdBy === user?.id;
 
+  // Socket connection for real-time updates
   useSocket(
     roomId,
-    (updated) => setParticipants(updated),
+    (updated) => {
+      console.log("👥 Host dashboard - participants updated:", updated);
+      setParticipants(updated);
+    },
     undefined,
     (data) => {
+      console.log("🚀 Host dashboard - quiz started:", data);
       if (data?.sessionId) {
         router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
       }
@@ -69,6 +74,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     
     const loadData = async () => {
       try {
+        // Load room data
         const roomRes = await fetch(`/api/room/${roomId}`);
         if (!roomRes.ok) throw new Error("Room not found");
         const roomData = await roomRes.json();
@@ -76,10 +82,18 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
         setQuestionCount(roomData.room.questionCount);
         setTimePerQuestion(roomData.room.timePerQuestion);
 
+        // Load questions
         const questionsRes = await fetch(`/api/question/list?roomId=${roomId}`);
         if (questionsRes.ok) {
           const questionsData = await questionsRes.json();
           setQuestions(questionsData);
+        }
+
+        // Load participants
+        const participantsRes = await fetch(`/api/participants?roomId=${roomId}`);
+        if (participantsRes.ok) {
+          const participantsData = await participantsRes.json();
+          setParticipants(participantsData.participants || []);
         }
       } catch (err: any) {
         setError(err.message);
@@ -89,6 +103,21 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     };
 
     loadData();
+
+    // Set up periodic participant updates
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/participants?roomId=${roomId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setParticipants(data.participants || []);
+        }
+      } catch (error) {
+        console.error("❌ Error fetching participants:", error);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
   }, [isLoaded, isSignedIn, roomId, router]);
 
   const updateSettings = async () => {
@@ -102,6 +131,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
       });
       
       if (!res.ok) throw new Error("Failed to update settings");
+      console.log("✅ Room settings updated successfully");
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -116,7 +146,11 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     }
     
     setStartLoading(true);
+    setError("");
+    
     try {
+      console.log(`🚀 Host starting quiz for room ${roomId}`);
+      
       const res = await fetch("/api/room/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -129,8 +163,12 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
       }
       
       const data = await res.json();
+      console.log("✅ Quiz started successfully:", data);
+      
+      // Navigate to quiz page
       router.push(`/quiz/${roomId}?sessionId=${data.session.id}`);
     } catch (err: any) {
+      console.error("❌ Error starting quiz:", err);
       setError(err.message);
     } finally {
       setStartLoading(false);
@@ -256,18 +294,25 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
               <p className="text-gray-300 mb-4">
                 Make sure you've added questions and configured the settings before starting.
               </p>
-              <NeonButton
-                onClick={startQuiz}
-                disabled={startLoading || questions.length === 0}
-                className="px-8 py-3 bg-green-500 text-black"
-              >
-                {startLoading ? "Starting..." : "Start Quiz"}
-              </NeonButton>
-              {questions.length === 0 && (
-                <p className="text-yellow-400 text-sm mt-2">
-                  ⚠️ Please add at least one question before starting
-                </p>
-              )}
+              <div className="flex flex-col sm:flex-row gap-4 items-start">
+                <NeonButton
+                  onClick={startQuiz}
+                  disabled={startLoading || questions.length === 0}
+                  className="px-8 py-3 bg-green-500 text-black"
+                >
+                  {startLoading ? "Starting..." : "Start Quiz"}
+                </NeonButton>
+                {questions.length === 0 && (
+                  <p className="text-yellow-400 text-sm">
+                    ⚠️ Please add at least one question before starting
+                  </p>
+                )}
+                {participants.length === 0 && (
+                  <p className="text-blue-400 text-sm">
+                    💡 Share the room code <span className="font-mono">{room?.code}</span> to invite participants
+                  </p>
+                )}
+              </div>
             </motion.section>
           )}
 

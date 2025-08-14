@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { motion } from "framer-motion";
@@ -45,6 +45,30 @@ export default function DashboardPage() {
     }
   );
 
+  // Periodically fetch participant list when waiting
+  useEffect(() => {
+    if (!waiting || !joinedRoomId) return;
+
+    const fetchParticipants = async () => {
+      try {
+        const res = await fetch(`/api/participants?roomId=${joinedRoomId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setParticipants(data.participants || []);
+        }
+      } catch (error) {
+        console.error("❌ Error fetching participants:", error);
+      }
+    };
+
+    // Initial fetch
+    fetchParticipants();
+
+    // Set up polling every 3 seconds
+    const interval = setInterval(fetchParticipants, 3000);
+    return () => clearInterval(interval);
+  }, [waiting, joinedRoomId]);
+
   if (!isLoaded) return <LoadingSpinner />;
 
   const handleCreateRoom = async () => {
@@ -85,24 +109,30 @@ export default function DashboardPage() {
     try {
       console.log(`🔍 Looking for room with code: ${roomCode}`);
       
+      // Find room by code
       const roomRes = await fetch(`/api/room/by-code?code=${roomCode.toUpperCase()}`);
       if (!roomRes.ok) {
-        throw new Error("Room not found");
+        throw new Error("Room not found. Please check the room code.");
       }
       const { room } = await roomRes.json();
       console.log("✅ Found room:", room);
 
+      // Join session
       const joinRes = await fetch("/api/session/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roomId: room.id }),
       });
 
-      if (joinRes.ok) {
-        const { sessionId } = await joinRes.json();
-        console.log("✅ Joined session:", sessionId);
+      if (!joinRes.ok) {
+        const joinError = await joinRes.json();
+        throw new Error(joinError.error || "Failed to join room");
       }
 
+      const joinData = await joinRes.json();
+      console.log("✅ Joined session:", joinData);
+
+      // Set up waiting room
       console.log(`🎯 Setting up waiting room for room: ${room.id}`);
       setJoinedRoomId(room.id);
       setWaiting(true);
@@ -222,6 +252,15 @@ export default function DashboardPage() {
                 <p className="text-sm text-gray-500 mt-2">
                   Room ID: {joinedRoomId}
                 </p>
+                
+                {/* Loading indicator */}
+                <div className="flex justify-center mt-4">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    className="w-8 h-8 border-4 border-gray-600 border-t-neonCyan rounded-full"
+                  />
+                </div>
               </div>
 
               <div className="mb-6">

@@ -1,6 +1,7 @@
 import { Server as IOServer } from "socket.io";
 import type { NextApiRequest } from "next";
 import type { NextApiResponseServerIO } from "@/types/next";
+import prisma from "@/lib/prisma";
 
 export const config = {
   api: {
@@ -16,7 +17,9 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       path: "/api/socket",
       addTrailingSlash: false,
       cors: {
-        origin: process.env.SOCKET_IO_CORS_ORIGIN || "http://localhost:3000",
+        origin: process.env.NODE_ENV === "production" 
+          ? [process.env.NEXT_PUBLIC_APP_URL || ""] 
+          : ["http://localhost:3000", "http://127.0.0.1:3000"],
         methods: ["GET", "POST"],
         credentials: true,
       },
@@ -28,7 +31,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
 
     // Rate limiting per socket
     const connectionCounts = new Map();
-    const MAX_CONNECTIONS_PER_IP = 5;
+    const MAX_CONNECTIONS_PER_IP = 10;
 
     // Connection handling
     io.on("connection", (socket) => {
@@ -37,7 +40,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
       // Rate limiting
       const currentConnections = connectionCounts.get(clientIP) || 0;
       if (currentConnections >= MAX_CONNECTIONS_PER_IP) {
-        console.warn(`Rate limit exceeded for IP: ${clientIP}`);
+        console.warn(`⚠️ Rate limit exceeded for IP: ${clientIP}`);
         socket.emit('error', { message: 'Too many connections from this IP' });
         socket.disconnect(true);
         return;
@@ -57,60 +60,40 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
           socket.join(roomId);
           console.log(`📥 ${socket.id} joined room ${roomId}`);
           
-          // Notify room about new participant
-          socket.to(roomId).emit("userJoined", { 
-            socketId: socket.id,
-            timestamp: new Date().toISOString()
-          });
+          // Get and broadcast updated participant list
+          await broadcastParticipants(io, roomId);
+          
+          // Confirm room join to client
+          socket.emit("roomJoined", { roomId, socketId: socket.id });
         } catch (error) {
-          console.error('Error joining room:', error);
+          console.error('❌ Error joining room:', error);
           socket.emit('error', { message: 'Failed to join room' });
         }
       });
 
-      // Handle answer submissions
-      socket.on("answerSubmitted", async (payload) => {
-        try {
-          const { roomId, userId, questionId, answer, timeLeft } = payload;
-          
-          // Validate payload
-          if (!roomId || !userId || !questionId) {
-            socket.emit('error', { message: 'Invalid answer data' });
-            return;
-          }
-
-          console.log(`📨 Answer submitted by ${userId} for question ${questionId}`);
-          
-          // Broadcast to room
-          io.to(roomId).emit("updateParticipants", {
-            userId,
-            questionId,
-            answer,
-            timeLeft,
-            timestamp: new Date().toISOString(),
-          });
-        } catch (error) {
-          console.error('Error handling answer submission:', error);
-          socket.emit('error', { message: 'Failed to submit answer' });
-        }
-      });
-
-      // Quiz control events
+      // Handle quiz start broadcasting
       socket.on("startQuiz", (data) => {
         try {
           const { roomId, sessionId } = data;
-          if (!roomId) return;
+          if (!roomId || !sessionId) {
+            console.error("❌ Missing roomId or sessionId in startQuiz event");
+            return;
+          }
           
-          console.log(`🎯 Quiz started in room ${roomId}`);
-          io.to(roomId).emit("quizStarted", { 
+          console.log(`🎯 Broadcasting quiz start to room ${roomId} with sessionId ${sessionId}`);
+          
+          // Emit to ALL clients in the room
+          io.to(roomId).emit("quizStarted", {
             sessionId,
-            timestamp: new Date().toISOString() 
+            roomId,
+            timestamp: new Date().toISOString(),
           });
         } catch (error) {
-          console.error('Error starting quiz:', error);
+          console.error('❌ Error broadcasting quiz start:', error);
         }
       });
 
+      // Handle next question
       socket.on("nextQuestion", (payload) => {
         try {
           const { roomId, questionIndex, question, timeLimit } = payload;
@@ -124,10 +107,11 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             timestamp: new Date().toISOString()
           });
         } catch (error) {
-          console.error('Error changing question:', error);
+          console.error('❌ Error changing question:', error);
         }
       });
 
+      // Handle quiz end
       socket.on("endQuiz", (payload) => {
         try {
           const { roomId, leaderboard, userStats } = payload;
@@ -140,19 +124,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
             timestamp: new Date().toISOString()
           });
         } catch (error) {
-          console.error('Error ending quiz:', error);
-        }
-      });
-
-      // Handle participant updates
-      socket.on("participantUpdate", (payload) => {
-        try {
-          const { roomId, participants } = payload;
-          if (!roomId || !Array.isArray(participants)) return;
-          
-          io.to(roomId).emit("updateParticipants", participants);
-        } catch (error) {
-          console.error('Error updating participants:', error);
+          console.error('❌ Error ending quiz:', error);
         }
       });
 
@@ -167,7 +139,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
 
       // Error handling
       socket.on("error", (error) => {
-        console.error(`Socket error for ${socket.id}:`, error);
+        console.error(`❌ Socket error for ${socket.id}:`, error);
       });
     });
 
@@ -175,4 +147,33 @@ export default function handler(req: NextApiRequest, res: NextApiResponseServerI
   }
   
   res.end();
+}
+
+// Helper function to broadcast participant updates
+async function broadcastParticipants(io: IOServer, roomId: string) {
+  try {
+    // Get active session for the room
+    const session = await prisma.quizSession.findFirst({
+      where: { roomId, isActive: true },
+      orderBy: { createdAt: "desc" }
+    });
+
+    if (!session) return;
+
+    // Get participant details
+    const participants = await prisma.user.findMany({
+      where: { clerkId: { in: session.participants } },
+      select: {
+        id: true,
+        clerkId: true,
+        name: true,
+        email: true,
+      }
+    });
+
+    console.log(`📊 Broadcasting ${participants.length} participants to room ${roomId}`);
+    io.to(roomId).emit("updateParticipants", participants);
+  } catch (error) {
+    console.error("❌ Error broadcasting participants:", error);
+  }
 }
