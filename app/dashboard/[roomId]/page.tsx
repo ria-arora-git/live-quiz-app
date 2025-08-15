@@ -32,11 +32,7 @@ interface Participant {
   clerkId: string;
 }
 
-export default function RoomDashboard({
-  params,
-}: {
-  params: { roomId: string };
-}) {
+export default function RoomDashboard({ params }: { params: { roomId: string } }) {
   const { roomId } = params;
   const { user, isLoaded, isSignedIn } = useUser();
   const router = useRouter();
@@ -54,31 +50,28 @@ export default function RoomDashboard({
   const isHost = room?.createdBy === user?.id;
 
   // Stable event handlers to prevent socket reconnections
-  const socketEvents = useMemo(() => ({
-    onParticipantsUpdate: (updated: Participant[]) => {
-      console.log("👥 Host dashboard - participants updated:", updated);
-      setParticipants(updated);
-    },
-    onQuizStart: (data: { sessionId?: string }) => {
-      console.log("🚀 Host dashboard - quiz started:", data);
-      if (data?.sessionId) {
-        router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
-      }
-    },
-  }), [roomId, router]);
+  const socketEvents = useMemo(
+    () => ({
+      onParticipantsUpdate: (updated: Participant[]) => {
+        console.log("👥 Host dashboard - participants updated:", updated);
+        setParticipants(updated || []);
+      },
+      onQuizStart: (data: { sessionId?: string }) => {
+        console.log("🚀 Host dashboard - quiz started:", data);
+        if (data?.sessionId) {
+          router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
+        }
+      },
+    }),
+    [roomId, router]
+  );
 
-  // Only initialize socket when we have all required data
+  // Only initialize socket when prerequisites are met
   const socket = useMemo(() => {
     if (!roomId || !user?.id || !isLoaded || !isSignedIn) {
       return null;
     }
-    
-    return useSocket(
-      roomId,
-      user.id,
-      user.firstName ?? undefined,
-      socketEvents
-    );
+    return useSocket(roomId, user.id, user.firstName ?? undefined, socketEvents);
   }, [roomId, user?.id, user?.firstName, isLoaded, isSignedIn, socketEvents]);
 
   const loadData = useCallback(async () => {
@@ -98,13 +91,17 @@ export default function RoomDashboard({
       const questionsRes = await fetch(`/api/question/list?roomId=${roomId}`);
       if (questionsRes.ok) {
         const questionsData = await questionsRes.json();
-        setQuestions(questionsData);
+        setQuestions(questionsData || []);
+      } else {
+        setQuestions([]);
       }
 
       const participantsRes = await fetch(`/api/participants?roomId=${roomId}`);
       if (participantsRes.ok) {
         const participantsData = await participantsRes.json();
         setParticipants(participantsData.participants || []);
+      } else {
+        setParticipants([]);
       }
     } catch (err: any) {
       setError(err.message);
@@ -122,10 +119,10 @@ export default function RoomDashboard({
     loadData();
   }, [isLoaded, isSignedIn, loadData, router]);
 
-  // Polling for participants (backup to socket)
+  // Polling participants as a fallback
   useEffect(() => {
     if (!roomId) return;
-    
+
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/participants?roomId=${roomId}`);
@@ -134,9 +131,9 @@ export default function RoomDashboard({
           setParticipants(data.participants || []);
         }
       } catch {
-        // Silent fail - socket should handle this
+        // ignore errors here, socket handles real-time updates
       }
-    }, 5000); // Increased to 5 seconds to reduce server load
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [roomId]);
@@ -159,7 +156,7 @@ export default function RoomDashboard({
   }, [roomId, questionCount, timePerQuestion]);
 
   const startQuiz = useCallback(async () => {
-    if (questions.length === 0) {
+    if ((questions?.length ?? 0) === 0) {
       setError("Please add at least one question before starting");
       return;
     }
@@ -182,7 +179,7 @@ export default function RoomDashboard({
     } finally {
       setStartLoading(false);
     }
-  }, [roomId, questionCount, timePerQuestion, questions.length, router]);
+  }, [roomId, questionCount, timePerQuestion, questions, router]);
 
   const copyRoomCode = useCallback(() => {
     if (!room?.code) return;
@@ -195,25 +192,20 @@ export default function RoomDashboard({
     }
   }, [room?.code]);
 
-  // Show loading while essential data is loading
   if (!isLoaded || loading) return <LoadingSpinner />;
 
-  // Redirect if not signed in
   if (!isSignedIn) {
     router.replace("/sign-in");
     return null;
   }
 
-  // Show error state
   if (error && !room) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black text-white p-4">
         <div className="max-w-md text-center space-y-4">
           <h2 className="text-3xl font-bold text-red-600">Error</h2>
           <p className="text-gray-300">{error}</p>
-          <NeonButton onClick={() => router.push("/dashboard")}>
-            Back to Dashboard
-          </NeonButton>
+          <NeonButton onClick={() => router.push("/dashboard")}>Back to Dashboard</NeonButton>
         </div>
       </div>
     );
@@ -222,7 +214,6 @@ export default function RoomDashboard({
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white">
       <div className="container mx-auto px-6 py-8">
-        {/* Room Header */}
         <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -230,10 +221,9 @@ export default function RoomDashboard({
         >
           <div className="flex flex-col sm:flex-row gap-4 sm:justify-between sm:items-center">
             <div>
-              <h1 className="text-3xl font-bold neon-text">{room?.name}</h1>
+              <h1 className="text-3xl font-bold neon-text">{room?.name || "Quiz Room"}</h1>
               <p className="text-gray-300 mt-1">
-                Room Code:{" "}
-                <span className="font-mono text-neonCyan">{room?.code}</span>
+                Room Code: <span className="font-mono text-neonCyan">{room?.code || "----"}</span>
               </p>
               {socket && (
                 <p className="text-sm text-gray-400 mt-1">
@@ -242,18 +232,13 @@ export default function RoomDashboard({
               )}
             </div>
             <div>
-              <NeonButton
-                onClick={copyRoomCode}
-                className="text-sm px-4 py-2"
-                data-copy-button
-              >
+              <NeonButton onClick={copyRoomCode} className="text-sm px-4 py-2" data-copy-button>
                 Copy Code
               </NeonButton>
             </div>
           </div>
         </motion.header>
 
-        {/* Error Display */}
         {error && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -265,10 +250,8 @@ export default function RoomDashboard({
         )}
 
         <div className="space-y-8 max-w-5xl mx-auto">
-          {/* Host-only sections */}
           {isHost && (
             <>
-              {/* Quiz Settings */}
               <motion.section
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -278,50 +261,37 @@ export default function RoomDashboard({
                 <h2 className="text-xl font-bold neon-text mb-4">Quiz Settings</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
                   <div>
-                    <label className="block mb-1 text-gray-400 font-semibold">
-                      Number of Questions
-                    </label>
+                    <label className="block mb-1 text-gray-400 font-semibold">Number of Questions</label>
                     <input
                       type="number"
                       min={1}
                       max={50}
                       value={questionCount}
                       onChange={(e) =>
-                        setQuestionCount(
-                          Math.min(Math.max(1, Number(e.target.value)), 50)
-                        )
+                        setQuestionCount(Math.min(Math.max(1, Number(e.target.value)), 50))
                       }
                       className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neonCyan"
                     />
                   </div>
                   <div>
-                    <label className="block mb-1 text-gray-400 font-semibold">
-                      Time per Question (seconds)
-                    </label>
+                    <label className="block mb-1 text-gray-400 font-semibold">Time per Question (seconds)</label>
                     <input
                       type="number"
                       min={5}
                       max={300}
                       value={timePerQuestion}
                       onChange={(e) =>
-                        setTimePerQuestion(
-                          Math.min(Math.max(5, Number(e.target.value)), 300)
-                        )
+                        setTimePerQuestion(Math.min(Math.max(5, Number(e.target.value)), 300))
                       }
                       className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neonCyan"
                     />
                   </div>
                 </div>
-                <NeonButton
-                  onClick={updateSettings}
-                  disabled={saveLoading}
-                  className="px-6 py-2"
-                >
+                <NeonButton onClick={updateSettings} disabled={saveLoading} className="px-6 py-2">
                   {saveLoading ? "Saving..." : "Save Settings"}
                 </NeonButton>
               </motion.section>
 
-              {/* Start Quiz Section */}
               <motion.section
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -335,36 +305,31 @@ export default function RoomDashboard({
                 <div className="flex items-center gap-4">
                   <NeonButton
                     onClick={startQuiz}
-                    disabled={startLoading || questions.length === 0}
+                    disabled={startLoading || (questions?.length ?? 0) === 0}
                     className="px-6 py-2"
                   >
                     {startLoading ? "Starting..." : "Start Quiz"}
                   </NeonButton>
-                  {questions.length === 0 && (
-                    <span className="text-yellow-400 font-semibold">
-                      No questions added yet
-                    </span>
+                  {(questions?.length ?? 0) === 0 && (
+                    <span className="text-yellow-400 font-semibold">No questions added yet</span>
                   )}
                 </div>
               </motion.section>
             </>
           )}
 
-          {/* Participants Section */}
           <motion.section
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
             className="bg-gray-800 p-6 rounded-lg border border-gray-700"
           >
-            <h2 className="text-xl font-bold text-neonCyan mb-4">
-              Participants ({participants.length})
-            </h2>
-            {participants.length === 0 ? (
+            <h2 className="text-xl font-bold text-neonCyan mb-4">Participants ({participants?.length ?? 0})</h2>
+            {(participants?.length ?? 0) === 0 ? (
               <p className="text-gray-500">No participants have joined yet.</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-64 overflow-y-auto">
-                {participants.map(({ id, name, email }) => (
+                {(participants || []).map(({ id, name, email }) => (
                   <div
                     key={id}
                     className="bg-gray-900 rounded-md p-3 border border-gray-700 flex items-center gap-3"
@@ -372,16 +337,13 @@ export default function RoomDashboard({
                     <div className="w-8 h-8 rounded-full bg-gradient-to-r from-neonPink to-neonCyan flex items-center justify-center text-black font-bold text-lg">
                       {(name || email || "A")[0].toUpperCase()}
                     </div>
-                    <div className="truncate">
-                      {name || email || "Anonymous"}
-                    </div>
+                    <div className="truncate">{name || email || "Anonymous"}</div>
                   </div>
                 ))}
               </div>
             )}
           </motion.section>
 
-          {/* Questions Section (Host only) */}
           {isHost && (
             <motion.section
               initial={{ opacity: 0, y: 30 }}
@@ -389,31 +351,21 @@ export default function RoomDashboard({
               transition={{ delay: 0.4 }}
               className="bg-gray-800 p-6 rounded-lg border border-gray-700"
             >
-              <h2 className="text-xl font-bold text-neonPink mb-4">
-                Quiz Questions
-              </h2>
-              <AddQuestionForm
-                roomId={roomId}
-                onAdded={(q) => setQuestions((prev) => [...prev, q])}
-              />
-              {questions.length === 0 ? (
+              <h2 className="text-xl font-bold text-neonPink mb-4">Quiz Questions</h2>
+              <AddQuestionForm roomId={roomId} onAdded={(q) => setQuestions((prev) => [...prev, q])} />
+              {(questions?.length ?? 0) === 0 ? (
                 <p className="mt-6 text-gray-500">No questions added yet.</p>
               ) : (
                 <ul className="mt-6 space-y-3 max-h-64 overflow-y-auto">
-                  {questions.map(({ id, text, options, answer }, idx) => (
-                    <li
-                      key={id}
-                      className="bg-gray-900 border border-gray-700 rounded-md p-3"
-                    >
+                  {(questions || []).map(({ id, text, options, answer }, idx) => (
+                    <li key={id} className="bg-gray-900 border border-gray-700 rounded-md p-3">
                       <p className="mb-2 font-semibold">{`${idx + 1}. ${text}`}</p>
                       <div className="grid grid-cols-2 gap-2 text-sm">
-                        {options.map((option, i) => (
+                        {(options || []).map((option, i) => (
                           <span
                             key={i}
                             className={`px-2 py-1 rounded ${
-                              option === answer
-                                ? "bg-green-600 text-white"
-                                : "bg-gray-700 text-gray-300"
+                              option === answer ? "bg-green-600 text-white" : "bg-gray-700 text-gray-300"
                             }`}
                           >
                             {option}
