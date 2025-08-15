@@ -55,10 +55,10 @@ export default function RoomDashboard({
 
   // Socket connection for real-time updates with user info passed correctly
   useSocket(roomId, user?.id ?? undefined, user?.firstName ?? undefined, {
-    onParticipantsUpdate: (updated) => {
+    onParticipantsUpdate: (updated: Participant[]) => {
       setParticipants(updated);
     },
-    onQuizStart: (data) => {
+    onQuizStart: (data: { sessionId?: string }) => {
       if (data?.sessionId) {
         router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
       }
