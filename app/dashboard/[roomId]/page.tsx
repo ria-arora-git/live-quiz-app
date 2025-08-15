@@ -49,7 +49,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
 
   const isHost = room?.createdBy === user?.id;
 
-  // ✅ FIXED: Handlers are passed as fourth argument
+  // Correct useSocket call: pass event handlers as FOURTH argument
   useSocket(
     roomId,
     user?.id ?? undefined,
@@ -62,7 +62,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
         if (data?.sessionId) {
           router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
         }
-      }
+      },
     }
   );
 
@@ -73,7 +73,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
       setLoading(true);
       setError("");
 
-      // Fetch room details
       const roomRes = await fetch(`/api/room/${roomId}`);
       if (!roomRes.ok) throw new Error("Room not found");
       const roomData = await roomRes.json();
@@ -81,14 +80,12 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
       setQuestionCount(roomData.room.questionCount);
       setTimePerQuestion(roomData.room.timePerQuestion);
 
-      // Fetch questions
       const questionsRes = await fetch(`/api/question/list?roomId=${roomId}`);
       if (questionsRes.ok) {
         const questionsData = await questionsRes.json();
         setQuestions(questionsData);
       }
 
-      // Fetch participants
       const participantsRes = await fetch(`/api/participants?roomId=${roomId}`);
       if (participantsRes.ok) {
         const participantsData = await participantsRes.json();
@@ -99,7 +96,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     } finally {
       setLoading(false);
     }
-  }, [roomId, isLoaded, isSignedIn]);
+  }, [isLoaded, isSignedIn, roomId]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -119,7 +116,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
           const data = await res.json();
           setParticipants(data.participants || []);
         }
-      } catch (_error) {}
+      } catch {}
     }, 2000);
     return () => clearInterval(interval);
   }, [roomId]);
@@ -195,7 +192,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white">
       <div className="container mx-auto px-6 py-8">
-        {/* Room Header */}
         <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -209,7 +205,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
               </p>
             </div>
             <div>
-              <NeonButton onClick={copyRoomCode} className="text-sm px-4 py-2">
+              <NeonButton onClick={copyRoomCode} className="text-sm px-4 py-2" data-copy-button>
                 Copy Code
               </NeonButton>
             </div>
@@ -244,7 +240,9 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
                       min={1}
                       max={50}
                       value={questionCount}
-                      onChange={(e) => setQuestionCount(Math.min(Math.max(1, Number(e.target.value)), 50))}
+                      onChange={(e) =>
+                        setQuestionCount(Math.min(Math.max(1, Number(e.target.value)), 50))
+                      }
                       className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neon-cyan"
                     />
                   </div>
@@ -255,7 +253,9 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
                       min={5}
                       max={300}
                       value={timePerQuestion}
-                      onChange={(e) => setTimePerQuestion(Math.min(Math.max(5, Number(e.target.value)), 300))}
+                      onChange={(e) =>
+                        setTimePerQuestion(Math.min(Math.max(5, Number(e.target.value)), 300))
+                      }
                       className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neon-cyan"
                     />
                   </div>
