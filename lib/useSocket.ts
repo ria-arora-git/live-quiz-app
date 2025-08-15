@@ -15,7 +15,7 @@ interface QuizEvents {
 
 export default function useSocket(roomId: string, events: QuizEvents = {}) {
   const socketRef = useRef<Socket | null>(null);
-  
+
   const {
     onParticipantsUpdate,
     onQuizStart,
@@ -35,7 +35,8 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
     }
 
     // Connect to external Railway Socket.IO backend
-    const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";
+    const SOCKET_URL =
+      process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";
 
     const socket = io(SOCKET_URL, {
       withCredentials: true,
@@ -98,7 +99,16 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
     return () => {
       socket.disconnect();
     };
-  }, [roomId, onParticipantsUpdate, onQuizStart, onQuestionChange, onTimeUp, onQuizEnd, onUserAnswered, onAnswerSubmitted]);
+  }, [
+    roomId,
+    onParticipantsUpdate,
+    onQuizStart,
+    onQuestionChange,
+    onTimeUp,
+    onQuizEnd,
+    onUserAnswered,
+    onAnswerSubmitted,
+  ]);
 
   useEffect(() => {
     initializeSocket();
@@ -117,8 +127,10 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
 
     return {
       startQuiz: (data: any) => socketRef.current?.emit("startQuiz", data),
-      nextQuestion: (data: any) => socketRef.current?.emit("nextQuestion", data),
-      submitAnswer: (data: any) => socketRef.current?.emit("submitAnswer", data),
+      nextQuestion: (data: any) =>
+        socketRef.current?.emit("nextQuestion", data),
+      submitAnswer: (data: any) =>
+        socketRef.current?.emit("submitAnswer", data),
       endQuiz: (data: any) => socketRef.current?.emit("endQuiz", data),
       isConnected: () => socketRef.current?.connected || false,
     };
