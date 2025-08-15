@@ -9,11 +9,12 @@ interface QuizEvents {
   onQuestionChange?: (data: any) => void;
   onTimeUp?: (data: any) => void;
   onQuizEnd?: (payload: any) => void;
-  onUserAnswered?: (data: any) => void;
   onAnswerSubmitted?: (data: any) => void;
+  onLeaderboardUpdate?: (data: any) => void;
+  onQuizState?: (data: any) => void;
 }
 
-export default function useSocket(roomId: string, events: QuizEvents = {}) {
+export default function useSocket(roomId: string, userId?: string, userName?: string, events: QuizEvents = {}) {
   const socketRef = useRef<Socket | null>(null);
 
   const {
@@ -22,8 +23,9 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
     onQuestionChange,
     onTimeUp,
     onQuizEnd,
-    onUserAnswered,
     onAnswerSubmitted,
+    onLeaderboardUpdate,
+    onQuizState,
   } = events;
 
   const initializeSocket = useCallback(() => {
@@ -34,13 +36,15 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
       socketRef.current.disconnect();
     }
 
-    // Connect to external Railway Socket.IO backend
-    const SOCKET_URL =
-      process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";
+    // Connect to Railway backend
+    const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";
+
+    console.log(`🔌 Connecting to socket server: ${SOCKET_URL}`);
 
     const socket = io(SOCKET_URL, {
       withCredentials: true,
       transports: ["websocket", "polling"],
+      timeout: 20000,
       forceNew: true,
     });
 
@@ -48,44 +52,55 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
 
     socket.on("connect", () => {
       console.log(`🟢 Connected to socket server: ${socket.id}`);
-      socket.emit("joinRoom", roomId);
+      
+      // Auto-join room on connect
+      if (roomId && userId) {
+        socket.emit("join-room", { roomId, userId, userName });
+      }
     });
 
-    socket.on("roomJoined", (data) => {
+    socket.on("room-joined", (data) => {
       console.log("✅ Room joined:", data);
     });
 
-    socket.on("updateParticipants", (participants) => {
-      console.log("👥 Participants updated:", participants);
-      onParticipantsUpdate?.(participants);
+    socket.on("participants-update", (data) => {
+      console.log("👥 Participants updated:", data.participants);
+      onParticipantsUpdate?.(data.participants);
     });
 
-    socket.on("quizStarted", (data) => {
+    socket.on("quiz-started", (data) => {
       console.log("🎯 Quiz started:", data);
       onQuizStart?.(data);
     });
 
-    socket.on("questionChanged", (data) => {
+    socket.on("quiz-state", (data) => {
+      console.log("📊 Quiz state:", data);
+      onQuizState?.(data);
+    });
+
+    socket.on("question-changed", (data) => {
       console.log("❓ Question changed:", data);
       onQuestionChange?.(data);
     });
 
-    socket.on("timeUp", (data) => {
+    socket.on("time-up", (data) => {
       console.log("⏰ Time up:", data);
       onTimeUp?.(data);
     });
 
-    socket.on("quizEnded", (data) => {
+    socket.on("answer-submitted", (data) => {
+      console.log("✅ Answer submitted:", data);
+      onAnswerSubmitted?.(data);
+    });
+
+    socket.on("leaderboard-update", (data) => {
+      console.log("🏆 Leaderboard update:", data);
+      onLeaderboardUpdate?.(data.leaderboard);
+    });
+
+    socket.on("quiz-ended", (data) => {
       console.log("🏁 Quiz ended:", data);
       onQuizEnd?.(data);
-    });
-
-    socket.on("userAnswered", (data) => {
-      onUserAnswered?.(data);
-    });
-
-    socket.on("answerSubmitted", (data) => {
-      onAnswerSubmitted?.(data);
     });
 
     socket.on("disconnect", (reason) => {
@@ -99,16 +114,7 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
     return () => {
       socket.disconnect();
     };
-  }, [
-    roomId,
-    onParticipantsUpdate,
-    onQuizStart,
-    onQuestionChange,
-    onTimeUp,
-    onQuizEnd,
-    onUserAnswered,
-    onAnswerSubmitted,
-  ]);
+  }, [roomId, userId, userName, onParticipantsUpdate, onQuizStart, onQuestionChange, onTimeUp, onQuizEnd, onAnswerSubmitted, onLeaderboardUpdate, onQuizState]);
 
   useEffect(() => {
     initializeSocket();
@@ -118,7 +124,7 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
     };
   }, [initializeSocket]);
 
-  // Socket methods to emit events to server
+  // Socket methods
   const socketMethods = useCallback(() => {
     if (!socketRef.current?.connected) {
       console.warn("⚠️ Socket not connected");
@@ -126,12 +132,9 @@ export default function useSocket(roomId: string, events: QuizEvents = {}) {
     }
 
     return {
-      startQuiz: (data: any) => socketRef.current?.emit("startQuiz", data),
-      nextQuestion: (data: any) =>
-        socketRef.current?.emit("nextQuestion", data),
-      submitAnswer: (data: any) =>
-        socketRef.current?.emit("submitAnswer", data),
-      endQuiz: (data: any) => socketRef.current?.emit("endQuiz", data),
+      submitAnswer: (data: any) => socketRef.current?.emit("submit-answer", data),
+      nextQuestion: (data: any) => socketRef.current?.emit("next-question", data),
+      endQuiz: (data: any) => socketRef.current?.emit("end-quiz", data),
       isConnected: () => socketRef.current?.connected || false,
     };
   }, []);

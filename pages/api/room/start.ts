@@ -1,5 +1,4 @@
-import type { NextApiRequest } from "next";
-import type { NextApiResponseServerIO } from "@/types/next";
+import type { NextApiRequest, NextApiResponse } from "next";
 import { getAuth } from "@clerk/nextjs/server";
 import prisma from "@/lib/prisma";
 import { z } from "zod";
@@ -10,7 +9,7 @@ const startQuizSchema = z.object({
   timePerQuestion: z.number().min(5).max(300).optional(),
 });
 
-export default async function handler(req: NextApiRequest, res: NextApiResponseServerIO) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -22,7 +21,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponseS
     }
 
     const { roomId, questionCount, timePerQuestion } = startQuizSchema.parse(req.body);
-    console.log(`🚀 Starting quiz for room ${roomId} by user ${userId}`);
+    console.log(`🚀 Host starting quiz for room ${roomId}`);
 
     // Get room and verify ownership
     const room = await prisma.room.findUnique({
@@ -42,6 +41,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponseS
       return res.status(400).json({ error: "Please add at least one question before starting the quiz" });
     }
 
+    // Get questions
+    const questions = await prisma.question.findMany({
+      where: { roomId },
+      orderBy: [{ order: "asc" }, { createdAt: "asc" }],
+      take: questionCount || room.questionCount
+    });
+
     // Update room settings if provided
     if (questionCount || timePerQuestion) {
       await prisma.room.update({
@@ -52,17 +58,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponseS
           updatedAt: new Date(),
         },
       });
-      console.log(`⚙️ Updated room settings for ${roomId}`);
     }
 
-    // Find existing session or create new one
+    // Create/update quiz session
     let session = await prisma.quizSession.findFirst({
       where: { roomId },
       orderBy: { createdAt: "desc" }
     });
 
     if (session) {
-      // Activate existing session
       session = await prisma.quizSession.update({
         where: { id: session.id },
         data: { 
@@ -71,9 +75,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponseS
           currentIndex: 0,
         },
       });
-      console.log(`✅ Activated existing session ${session.id} for room ${roomId}`);
     } else {
-      // Create new session if none exists
       session = await prisma.quizSession.create({
         data: {
           roomId,
@@ -83,23 +85,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponseS
           startedAt: new Date(),
         },
       });
-      console.log(`✅ Created new active session ${session.id} for room ${roomId}`);
     }
 
-    // Emit quiz start event via Socket.IO
-    if (res.socket.server.io) {
-      console.log(`📡 Emitting startQuiz to Socket.io server`);
-      
-      // Use the socket server's startQuiz handler
-      res.socket.server.io.emit("startQuiz", {
-        roomId,
-        sessionId: session.id,
-        timePerQuestion: timePerQuestion || room.timePerQuestion,
+    // Call Railway backend to start quiz with socket events
+    const RAILWAY_BACKEND = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000";
+    
+    try {
+      const backendRes = await fetch(`${RAILWAY_BACKEND}/api/quiz/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId,
+          questions,
+          timePerQuestion: timePerQuestion || room.timePerQuestion,
+        }),
       });
 
-      console.log(`🎯 Quiz start events emitted for room ${roomId}`);
-    } else {
-      console.error("❌ Socket.IO server not initialized!");
+      if (!backendRes.ok) {
+        throw new Error("Backend failed to start quiz");
+      }
+
+      console.log(`✅ Quiz started successfully via backend for room ${roomId}`);
+    } catch (backendError) {
+      console.error("❌ Backend start quiz error:", backendError);
       return res.status(500).json({ error: "Real-time server not available" });
     }
 
@@ -113,6 +121,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponseS
       },
       message: "Quiz started successfully"
     });
+
   } catch (error) {
     console.error("❌ Start Quiz API Error:", error);
     

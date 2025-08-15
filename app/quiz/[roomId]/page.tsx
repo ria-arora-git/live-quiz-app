@@ -32,7 +32,6 @@ interface QuizSession {
     createdBy: string;
     timePerQuestion: number;
   };
-  results: any[];
 }
 
 interface LeaderboardEntry {
@@ -57,18 +56,17 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
   const [quizStarted, setQuizStarted] = useState(false);
   const [quizEnded, setQuizEnded] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [userStats, setUserStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
   const [timeLeft, setTimeLeft] = useState(0);
   const [questionStartTime, setQuestionStartTime] = useState<number | null>(null);
-  const [showResults, setShowResults] = useState(false);
+  const [hasAnswered, setHasAnswered] = useState(false);
+  const [showCorrectAnswer, setShowCorrectAnswer] = useState(false);
 
   const isHost = session?.room?.createdBy === user?.id;
 
   // Socket connection with comprehensive event handling
-  const socket = useSocket(roomId, {
+  const socket = useSocket(roomId, user?.id, user?.firstName || user?.emailAddresses[0]?.emailAddress, {
     onParticipantsUpdate: (updated) => {
       console.log("👥 Participants updated:", updated);
       setParticipants(updated);
@@ -81,7 +79,20 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       setCurrentQuestion(data.question);
       setTimeLeft(data.timePerQuestion);
       setQuestionStartTime(Date.now());
-      setShowResults(false);
+      setHasAnswered(false);
+      setShowCorrectAnswer(false);
+    },
+
+    onQuizState: (data) => {
+      console.log("📊 Received quiz state:", data);
+      if (data.isActive && data.question) {
+        setQuizStarted(true);
+        setCurrentQuestion(data.question);
+        setTimeLeft(data.timePerQuestion);
+        setQuestionStartTime(Date.now());
+        setHasAnswered(false);
+        setShowCorrectAnswer(false);
+      }
     },
     
     onQuestionChange: (data) => {
@@ -89,18 +100,14 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       setCurrentQuestion(data.question);
       setTimeLeft(data.timePerQuestion);
       setQuestionStartTime(Date.now());
-      setShowResults(false);
+      setHasAnswered(false);
+      setShowCorrectAnswer(false);
     },
     
     onTimeUp: (data) => {
       console.log("⏰ Time up:", data);
       setTimeLeft(0);
-      setShowResults(true);
-      
-      // Auto-hide results after 3 seconds to prepare for next question
-      setTimeout(() => {
-        setShowResults(false);
-      }, 3000);
+      setShowCorrectAnswer(true);
     },
     
     onQuizEnd: (payload) => {
@@ -108,20 +115,17 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       setQuizEnded(true);
       setQuizStarted(false);
       setLeaderboard(payload.leaderboard || []);
-      setUserStats(user?.id ? payload.userStats?.[user.id] || null : null);
     },
-    
-    onUserAnswered: (data) => {
-      console.log("📝 User answered:", data);
-      // Could show visual feedback that someone answered
-    },
-    
+
     onAnswerSubmitted: (data) => {
-      console.log("✅ Answer submitted:", data);
-      // Mark question as answered
-      if (data.questionId) {
-        setAnsweredQuestions(prev => new Set([...prev, data.questionId]));
-      }
+      console.log("✅ Answer result:", data);
+      setUserScore(data.totalScore);
+      setHasAnswered(true);
+    },
+
+    onLeaderboardUpdate: (leaderboardData) => {
+      console.log("🏆 Leaderboard updated:", leaderboardData);
+      setLeaderboard(leaderboardData);
     }
   });
 
@@ -143,7 +147,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       // Check if quiz is already active
       if (data.session.isActive) {
         setQuizStarted(true);
-        // Could load current question here if needed
       }
     } catch (err: any) {
       setError(err.message);
@@ -162,63 +165,58 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
 
   // Handle answer submission
   const handleAnswerSubmit = async (selectedOption: string, currentTimeLeft: number) => {
-    if (!session || !currentQuestion || quizEnded || isHost) return;
+    if (!session || !currentQuestion || quizEnded || isHost || hasAnswered) return;
     
     const questionId = currentQuestion.id;
-    if (answeredQuestions.has(questionId)) return;
     
     try {
-      // Submit to API
-      const res = await fetch("/api/question/answer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId: session.id,
-          questionId,
-          selectedOption,
-          timeLeft: currentTimeLeft,
-        }),
+      // Submit via socket for real-time response
+      socket?.submitAnswer({
+        roomId,
+        questionId,
+        selectedOption,
+        userId: user?.id,
+        timeLeft: currentTimeLeft,
       });
       
-      if (res.ok) {
-        const result = await res.json();
-        if (result.correct) {
-          setUserScore(prev => prev + result.points);
-        }
-        
-        // Emit via socket for real-time feedback
-        socket?.submitAnswer({
-          roomId,
-          questionId,
-          selectedOption,
-          timeLeft: currentTimeLeft,
-        });
-      }
     } catch (err) {
       console.error("Error submitting answer:", err);
     }
   };
 
   // Host controls
-  const handleStartQuiz = () => {
-    if (!socket || !session) return;
+  const handleStartQuiz = async () => {
+    if (!session) return;
     
-    socket.startQuiz({
-      roomId,
-      sessionId: session.id,
-      timePerQuestion: session.room.timePerQuestion,
-    });
+    try {
+      const res = await fetch("/api/room/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId,
+          timePerQuestion: session.room.timePerQuestion,
+        }),
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to start quiz");
+      }
+      
+      console.log("✅ Quiz start request sent");
+    } catch (error) {
+      console.error("❌ Error starting quiz:", error);
+      setError((error as Error).message);
+    }
   };
 
   const handleNextQuestion = () => {
     if (!socket) return;
-    
     socket.nextQuestion({ roomId });
   };
 
   const handleEndQuiz = () => {
     if (!socket) return;
-    
     socket.endQuiz({ roomId });
   };
 
@@ -259,11 +257,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
   if (!session) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin text-6xl mb-6">⏳</div>
-          <h2 className="text-2xl font-bold text-neonCyan mb-4">Loading Quiz...</h2>
-          <p className="text-gray-400">Please wait while we set up your quiz session</p>
-        </div>
+        <LoadingSpinner text="Loading Quiz..." />
       </div>
     );
   }
@@ -365,8 +359,9 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                   <QuizQuestion
                     question={currentQuestion}
                     onAnswer={handleAnswerSubmit}
-                    disabled={answeredQuestions.has(currentQuestion.id)}
+                    disabled={hasAnswered || timeLeft <= 0}
                     timeLeft={timeLeft}
+                    // showCorrectAnswer={showCorrectAnswer}
                   />
                 )}
 
@@ -406,20 +401,24 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                     </div>
                   </div>
                 )}
-
-                {/* Show intermediate results */}
-                {showResults && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="bg-blue-900 bg-opacity-50 rounded-lg p-6 border border-blue-600 text-center"
-                  >
-                    <h3 className="text-xl font-bold text-blue-400 mb-2">Time's Up!</h3>
-                    <p className="text-gray-300">Preparing next question...</p>
-                  </motion.div>
-                )}
               </motion.div>
             </AnimatePresence>
+          )}
+
+          {/* Real-time Leaderboard during Quiz */}
+          {quizStarted && !quizEnded && leaderboard.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-8"
+            >
+              <Leaderboard 
+                entries={leaderboard} 
+                title="Live Leaderboard"
+                showRanks={true}
+                maxEntries={5}
+              />
+            </motion.div>
           )}
 
           {/* Quiz Results */}
@@ -429,20 +428,18 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
               animate={{ opacity: 1, y: 0 }}
               className="space-y-8"
             >
-              {!isHost && userStats && (
+              {!isHost && (
                 <div className="bg-gradient-to-r from-green-900 to-blue-900 rounded-lg p-6 border border-green-500 text-center">
                   <h2 className="text-3xl font-bold text-green-400 mb-4">Quiz Complete!</h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <div className="text-3xl font-bold text-neonCyan">{userStats.score}</div>
+                      <div className="text-3xl font-bold text-neonCyan">{userScore}</div>
                       <div className="text-gray-300">Total Points</div>
                     </div>
                     <div>
-                      <div className="text-3xl font-bold text-green-400">{userStats.correct}</div>
-                      <div className="text-gray-300">Correct Answers</div>
-                    </div>
-                    <div>
-                      <div className="text-3xl font-bold text-yellow-400">{userStats.accuracy}%</div>
+                      <div className="text-3xl font-bold text-yellow-400">
+                        {currentQuestion ? Math.round((userScore / currentQuestion.total) * 100) : 0}%
+                      </div>
                       <div className="text-gray-300">Accuracy</div>
                     </div>
                   </div>
