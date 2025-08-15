@@ -51,20 +51,21 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
 
   // Correct useSocket call: pass event handlers as FOURTH argument
   useSocket(
-    roomId,
-    user?.id ?? undefined,
-    user?.firstName ?? undefined,
-    {
-      onParticipantsUpdate: (updated: Participant[]) => {
-        setParticipants(updated);
-      },
-      onQuizStart: (data: { sessionId?: string }) => {
-        if (data?.sessionId) {
-          router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
-        }
-      },
+  roomId,
+  user?.id ?? undefined,
+  user?.firstName ?? undefined,
+  {
+    onParticipantsUpdate: (updated: Participant[]) => {
+      setParticipants(updated);
+    },
+    onQuizStart: (data: { sessionId?: string }) => {
+      if (data?.sessionId) {
+        router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
+      }
     }
-  );
+  }
+);
+
 
   const loadData = useCallback(async () => {
     if (!isLoaded || !isSignedIn) return;
