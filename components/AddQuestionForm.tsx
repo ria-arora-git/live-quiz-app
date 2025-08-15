@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import NeonButton from "./NeonButton";
 
@@ -16,24 +16,26 @@ export default function AddQuestionForm({ roomId, onAdded }: AddQuestionFormProp
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const parsePastedInput = (value: string) => {
+  const parsePastedInput = useCallback((value: string) => {
+    if (!value?.trim()) return;
+    
     const lines = value.split("\n").map((l) => l.trim()).filter(Boolean);
-
-    if (lines.length >= 2) {
+    
+    if ((lines?.length ?? 0) >= 2) {
       // Extract question (remove question number if present)
-      let questionLine = lines[0].replace(/^\d+\.\s*/, "");
+      let questionLine = (lines[0] || "").replace(/^\d+\.\s*/, "");
       setText(questionLine);
 
       const parsedOptions: string[] = [];
       let correctAnswer = "";
 
-      for (let i = 1; i < lines.length && parsedOptions.length < 4; i++) {
-        const opt = lines[i];
+      for (let i = 1; i < (lines?.length ?? 0) && parsedOptions.length < 4; i++) {
+        const opt = lines[i] || "";
 
         // Match "A) something", "B ) something", etc.
         const match = opt.match(/^[A-Z]\)\s*(.+)$/i);
         if (match) {
-          let optionText = match[1].trim();
+          let optionText = (match[1] || "").trim();
           
           // Check for correct answer marker
           if (optionText.includes("✅") || optionText.includes("*")) {
@@ -63,35 +65,37 @@ export default function AddQuestionForm({ roomId, onAdded }: AddQuestionFormProp
         setAnswer(correctAnswer);
       }
     }
-  };
+  }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     
-    const filledOptions = options.filter(opt => opt.trim());
+    const validOptions = (options || []).filter(opt => opt?.trim());
+    const optionsLength = validOptions?.length ?? 0;
     
-    if (!text.trim()) {
+    if (!text?.trim()) {
       setError("Please enter a question");
       return;
     }
     
-    if (filledOptions.length < 2) {
+    if (optionsLength < 2) {
       setError("Please provide at least 2 options");
       return;
     }
     
-    if (!answer.trim()) {
+    if (!answer?.trim()) {
       setError("Please select the correct answer");
       return;
     }
     
-    if (!filledOptions.includes(answer)) {
+    if (!validOptions.includes(answer?.trim())) {
       setError("The correct answer must be one of the options");
       return;
     }
 
     setLoading(true);
+    
     try {
       const res = await fetch("/api/question/add", {
         method: "POST",
@@ -99,30 +103,45 @@ export default function AddQuestionForm({ roomId, onAdded }: AddQuestionFormProp
         body: JSON.stringify({ 
           roomId, 
           text: text.trim(), 
-          options: filledOptions, 
+          options: validOptions, 
           answer: answer.trim() 
         }),
       });
       
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({ error: "Failed to add question" }));
         throw new Error(errorData.error || "Failed to add question");
       }
       
       const result = await res.json();
-      onAdded(result.question);
-      
-      // Reset form
-      setText("");
-      setOptions(["", "", "", ""]);
-      setAnswer("");
-      setError("");
-    } catch (err: any) {
-      setError(err.message);
+      if (result?.question) {
+        onAdded(result.question);
+        
+        // Reset form
+        setText("");
+        setOptions(["", "", "", ""]);
+        setAnswer("");
+        setError("");
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to add question";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, [roomId, text, options, answer, onAdded]);
+
+  const updateOption = useCallback((index: number, value: string) => {
+    if (index < 0 || index >= 4) return;
+    
+    setOptions(prev => {
+      const newOptions = [...(Array.isArray(prev) ? prev : ["", "", "", ""])];
+      newOptions[index] = value;
+      return newOptions;
+    });
+  }, []);
+
+  const optionsArray = Array.isArray(options) ? options : ["", "", "", ""];
 
   return (
     <motion.div
@@ -149,7 +168,7 @@ export default function AddQuestionForm({ roomId, onAdded }: AddQuestionFormProp
             value={text}
             onChange={(e) => setText(e.target.value)}
             onPaste={(e) => {
-              const paste = e.clipboardData.getData("text");
+              const paste = e.clipboardData?.getData("text") || "";
               if (paste.includes("A)") || paste.includes("✅") || paste.includes("*")) {
                 e.preventDefault();
                 parsePastedInput(paste);
@@ -157,6 +176,7 @@ export default function AddQuestionForm({ roomId, onAdded }: AddQuestionFormProp
             }}
             className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 border border-gray-600 focus:border-neonPink focus:outline-none resize-none"
             rows={3}
+            disabled={loading}
           />
         </div>
 
@@ -166,7 +186,7 @@ export default function AddQuestionForm({ roomId, onAdded }: AddQuestionFormProp
             Answer Options
           </label>
           <div className="space-y-3">
-            {options.map((option, index) => (
+            {optionsArray.map((option, index) => (
               <div key={index} className="flex gap-3 items-center">
                 <span className="text-sm text-gray-400 w-8">
                   {String.fromCharCode(65 + index)})
@@ -174,21 +194,19 @@ export default function AddQuestionForm({ roomId, onAdded }: AddQuestionFormProp
                 <input
                   type="text"
                   placeholder={`Option ${index + 1}`}
-                  value={option}
-                  onChange={(e) => {
-                    const newOptions = [...options];
-                    newOptions[index] = e.target.value;
-                    setOptions(newOptions);
-                  }}
+                  value={option || ""}
+                  onChange={(e) => updateOption(index, e.target.value)}
                   className="flex-1 bg-gray-800 text-white rounded-lg px-3 py-2 border border-gray-600 focus:border-neonPink focus:outline-none"
+                  disabled={loading}
                 />
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="radio"
                     name="correct"
-                    checked={answer === option && !!option.trim()}
-                    onChange={() => setAnswer(option)}
+                    checked={answer === option && !!option?.trim()}
+                    onChange={() => setAnswer(option || "")}
                     className="text-neonPink focus:ring-neonPink"
+                    disabled={loading || !option?.trim()}
                   />
                   <span className="text-xs text-gray-400">Correct</span>
                 </label>

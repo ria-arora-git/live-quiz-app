@@ -1,355 +1,335 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
 import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import useSocket from "@/lib/useSocket";
 import NeonButton from "@/components/NeonButton";
 import LoadingSpinner from "@/components/LoadingSpinner";
 
-interface Participant {
+interface Room {
   id: string;
-  name?: string;
-  email?: string;
-  clerkId: string;
+  code: string;
+  name: string;
+  createdBy: string;
+  questionCount: number;
+  timePerQuestion: number;
+  createdAt: string;
 }
 
-export default function DashboardPage() {
-  const [roomCode, setRoomCode] = useState("");
-  const [participants, setParticipants] = useState<Participant[]>([]);
-  const [waiting, setWaiting] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [joinedRoomId, setJoinedRoomId] = useState<string | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<string>("disconnected");
-
+export default function Dashboard() {
+  const { user, isLoaded, isSignedIn } = useUser();
   const router = useRouter();
-  const { user, isLoaded } = useUser();
 
-  // ✅ FIXED: Socket connection for waiting room with correct parameter order
-  const socket = useSocket(
-    joinedRoomId || "",
-    user?.id ?? undefined,
-    user?.firstName ?? undefined,
-    {
-      onParticipantsUpdate: (updated: Participant[]) => {
-        console.log("📊 Dashboard participants updated:", updated);
-        setParticipants(updated);
-      },
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinLoading, setJoinLoading] = useState(false);
 
-      onQuizStart: (data: { sessionId?: string }) => {
-        console.log("🚀 Dashboard received quiz start:", data);
-        if (data?.sessionId && joinedRoomId) {
-          console.log(`🔄 Redirecting to: /quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
-          router.push(`/quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
-        } else {
-          console.error("❌ Missing sessionId or joinedRoomId:", {
-            sessionId: data?.sessionId,
-            joinedRoomId
-          });
-        }
+  // Load user's rooms
+  const loadRooms = useCallback(async () => {
+    if (!isLoaded || !isSignedIn) return;
+
+    try {
+      setError("");
+      const res = await fetch("/api/room/list");
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Failed to load rooms" }));
+        throw new Error(errorData.error || "Failed to load rooms");
       }
+      
+      const data = await res.json();
+      const validRooms = Array.isArray(data?.rooms) ? data.rooms : [];
+      setRooms(validRooms);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to load rooms";
+      console.error("Load rooms error:", err);
+      setError(errorMessage);
+      setRooms([]); // Ensure rooms is always an array
+    } finally {
+      setLoading(false);
     }
-  );
+  }, [isLoaded, isSignedIn]);
 
-  // Monitor connection status
   useEffect(() => {
-    if (!socket) {
-      setConnectionStatus("disconnected");
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      router.replace("/sign-in");
       return;
     }
+    loadRooms();
+  }, [isLoaded, isSignedIn, loadRooms, router]);
 
-    if (socket.isConnected && socket.isConnected()) {
-      setConnectionStatus("connected");
-    } else {
-      setConnectionStatus("connecting");
-    }
-  }, [socket]);
+  // Create new room
+  const createRoom = useCallback(async () => {
+    const roomName = prompt("Enter room name:")?.trim();
+    if (!roomName) return;
 
-  // Periodically fetch participant list when waiting
-  useEffect(() => {
-    if (!waiting || !joinedRoomId) return;
-
-    const fetchParticipants = async () => {
-      try {
-        const res = await fetch(`/api/participants?roomId=${joinedRoomId}`);
-        if (res.ok) {
-          const data = await res.json();
-          setParticipants(data.participants || []);
-        }
-      } catch (error) {
-        console.error("❌ Error fetching participants:", error);
-      }
-    };
-
-    // Initial fetch
-    fetchParticipants();
-
-    // Set up polling every 3 seconds
-    const interval = setInterval(fetchParticipants, 3000);
-    return () => clearInterval(interval);
-  }, [waiting, joinedRoomId]);
-
-  if (!isLoaded) return <LoadingSpinner />;
-
-  const handleCreateRoom = async () => {
-    setLoading(true);
+    setCreateLoading(true);
     setError("");
-    
+
     try {
       const res = await fetch("/api/room/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: roomName }),
       });
-      
+
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({ error: "Failed to create room" }));
         throw new Error(errorData.error || "Failed to create room");
       }
-      
-      const data = await res.json();
-      console.log("✅ Room created:", data);
-      router.push(`/dashboard/${data.room.id}`);
-    } catch (err: any) {
-      console.error("❌ Create room error:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleJoinRoom = async () => {
-    if (!roomCode.trim()) {
+      const data = await res.json();
+      if (data?.room?.id) {
+        router.push(`/dashboard/${data.room.id}`);
+      } else {
+        throw new Error("Invalid response from server");
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to create room";
+      setError(errorMessage);
+    } finally {
+      setCreateLoading(false);
+    }
+  }, [router]);
+
+  // Join existing room
+  const joinRoom = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const code = joinCode?.trim();
+    if (!code) {
       setError("Please enter a room code");
       return;
     }
-    
-    setLoading(true);
-    setError("");
-    
-    try {
-      console.log(`🔍 Looking for room with code: ${roomCode}`);
-      
-      // Find room by code
-      const roomRes = await fetch(`/api/room/by-code?code=${roomCode.toUpperCase()}`);
-      if (!roomRes.ok) {
-        throw new Error("Room not found. Please check the room code.");
-      }
-      const { room } = await roomRes.json();
-      console.log("✅ Found room:", room);
 
-      // Join session
-      const joinRes = await fetch("/api/session/join", {
+    setJoinLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/room/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: room.id }),
+        body: JSON.stringify({ code }),
       });
 
-      if (!joinRes.ok) {
-        const joinError = await joinRes.json();
-        throw new Error(joinError.error || "Failed to join room");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Failed to join room" }));
+        throw new Error(errorData.error || "Room not found");
       }
 
-      const joinData = await joinRes.json();
-      console.log("✅ Joined session:", joinData);
-
-      // Set up waiting room
-      console.log(`🎯 Setting up waiting room for room: ${room.id}`);
-      setJoinedRoomId(room.id);
-      setWaiting(true);
-    } catch (err: any) {
-      console.error("❌ Join room error:", err);
-      setError(err.message);
+      const data = await res.json();
+      if (data?.room?.id) {
+        router.push(`/dashboard/${data.room.id}`);
+      } else {
+        throw new Error("Invalid response from server");
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to join room";
+      setError(errorMessage);
     } finally {
-      setLoading(false);
+      setJoinLoading(false);
     }
-  };
+  }, [joinCode, router]);
 
-  const handleBackToDashboard = () => {
-    console.log("🔄 Going back to main dashboard");
-    setWaiting(false);
-    setJoinedRoomId(null);
-    setParticipants([]);
-    setRoomCode("");
-    setError("");
-  };
+  // Delete room
+  const deleteRoom = useCallback(async (roomId: string, roomName: string) => {
+    const confirmed = window.confirm(`Are you sure you want to delete "${roomName}"? This action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      setError("");
+      const res = await fetch(`/api/room/${roomId}`, { method: "DELETE" });
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Failed to delete room" }));
+        throw new Error(errorData.error || "Failed to delete room");
+      }
+
+      // Remove from local state
+      setRooms(prev => (prev || []).filter(room => room.id !== roomId));
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to delete room";
+      setError(errorMessage);
+    }
+  }, []);
+
+  if (!isLoaded || loading) {
+    return <LoadingSpinner />;
+  }
+
+  if (!isSignedIn) {
+    router.replace("/sign-in");
+    return null;
+  }
+
+  const roomsLength = rooms?.length ?? 0;
+  const userName = user?.firstName || user?.fullName || "User";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white">
       <div className="container mx-auto px-6 py-8">
-        <motion.div
+        {/* Header */}
+        <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-12"
         >
-          <h1 className="text-5xl font-bold neon-text mb-4">Quiz Dashboard</h1>
-          <p className="text-gray-400 text-lg">
-            Welcome back, {user?.firstName || "Player"}! Ready to compete?
-          </p>
-        </motion.div>
+          <h1 className="text-5xl font-bold neon-text mb-4">QuizMaster Dashboard</h1>
+          <p className="text-xl text-gray-300">Welcome back, {userName}!</p>
+        </motion.header>
 
+        {/* Error Display */}
         {error && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-red-500 bg-opacity-20 border border-red-500 rounded-lg p-4 mb-6 text-center max-w-2xl mx-auto"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="bg-red-700 bg-opacity-30 border border-red-600 rounded-lg p-4 mb-6 max-w-2xl mx-auto text-center"
           >
             <p className="text-red-300">{error}</p>
           </motion.div>
         )}
 
-        <div className="max-w-4xl mx-auto space-y-8">
-          {!waiting ? (
-            <>
-              <motion.section
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.2 }}
-                className="bg-gradient-to-r from-purple-900 to-pink-900 rounded-lg p-8 shadow-xl border border-purple-500"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-3xl font-bold text-neonPink mb-2">Host a Quiz</h2>
-                    <p className="text-gray-300 mb-6">
-                      Create a new room and invite participants using a join code.
-                    </p>
-                  </div>
-                  <div className="text-6xl opacity-20">🎯</div>
-                </div>
-                <NeonButton
-                  onClick={handleCreateRoom}
-                  disabled={loading}
-                  className="px-8 py-3"
-                >
-                  {loading ? "Creating..." : "Create Room"}
-                </NeonButton>
-              </motion.section>
+        {/* Action Buttons */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="flex flex-col sm:flex-row gap-4 justify-center mb-12 max-w-2xl mx-auto"
+        >
+          <NeonButton
+            onClick={createRoom}
+            disabled={createLoading}
+            className="flex-1 bg-green-600 hover:bg-green-700 py-4 text-lg font-semibold"
+          >
+            {createLoading ? "Creating..." : "🎯 Create New Quiz"}
+          </NeonButton>
 
-              <motion.section
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.4 }}
-                className="bg-gradient-to-r from-cyan-900 to-blue-900 rounded-lg p-8 shadow-xl border border-cyan-500"
-              >
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-3xl font-bold text-neonCyan mb-2">Join a Quiz</h2>
-                    <p className="text-gray-300">
-                      Enter the room code to join an existing quiz.
-                    </p>
-                  </div>
-                  <div className="text-6xl opacity-20">🚀</div>
-                </div>
-                
-                <div className="flex flex-col sm:flex-row gap-4">
-                  <input
-                    value={roomCode}
-                    onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                    placeholder="Enter Room Code (e.g., ABC123)"
-                    maxLength={6}
-                    className="flex-1 px-4 py-3 rounded-lg bg-gray-900 text-white border border-gray-700 focus:border-neonCyan focus:outline-none transition-colors font-mono text-center text-xl tracking-widest"
-                  />
-                  <NeonButton
-                    onClick={handleJoinRoom}
-                    disabled={loading || !roomCode.trim()}
-                    className="px-8 py-3 bg-neonCyan text-black"
-                  >
-                    {loading ? "Joining..." : "Join Room"}
-                  </NeonButton>
-                </div>
-              </motion.section>
-            </>
-          ) : (
-            <motion.section
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-lg p-8 shadow-xl border border-gray-600"
+          <form onSubmit={joinRoom} className="flex-1 flex gap-2">
+            <input
+              type="text"
+              placeholder="Enter room code..."
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              className="flex-1 bg-gray-800 text-white rounded-lg px-4 py-4 border border-gray-600 focus:border-neonCyan focus:outline-none text-center font-mono"
+              disabled={joinLoading}
+              maxLength={6}
+            />
+            <NeonButton
+              type="submit"
+              disabled={joinLoading || !joinCode.trim()}
+              className="bg-blue-600 hover:bg-blue-700 px-6 py-4"
             >
-              <div className="text-center mb-8">
-                <h2 className="text-3xl font-bold text-neonPink mb-4">Waiting Room</h2>
-                <p className="text-gray-400">
-                  Waiting for the host to start the quiz. You'll be redirected automatically.
-                </p>
-                <p className="text-sm text-gray-500 mt-2">
-                  Room ID: {joinedRoomId}
-                </p>
+              {joinLoading ? "..." : "Join"}
+            </NeonButton>
+          </form>
+        </motion.div>
+
+        {/* Rooms List */}
+        <motion.section
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="max-w-6xl mx-auto"
+        >
+          <h2 className="text-3xl font-bold text-center mb-8">Your Quiz Rooms ({roomsLength})</h2>
+
+          {roomsLength === 0 ? (
+            <div className="text-center py-12 bg-gray-800 rounded-lg border border-gray-700">
+              <div className="text-6xl mb-4">🎮</div>
+              <p className="text-xl text-gray-400 mb-4">No quiz rooms yet</p>
+              <p className="text-gray-500">Create your first room to get started!</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {rooms.map((room) => {
+                const { id, name, code, questionCount, timePerQuestion, createdAt } = room || {};
+                const formattedDate = createdAt ? new Date(createdAt).toLocaleDateString() : "Unknown";
                 
-                {/* Connection Status */}
-                <div className="flex items-center justify-center gap-2 mt-4">
-                  <div className={`w-3 h-3 rounded-full ${
-                    connectionStatus === "connected" ? "bg-green-400" :
-                    connectionStatus === "connecting" ? "bg-yellow-400 animate-pulse" :
-                    "bg-red-400"
-                  }`} />
-                  <span className="text-sm text-gray-400 capitalize">
-                    {connectionStatus}
-                  </span>
-                </div>
-                
-                {/* Loading indicator */}
-                <div className="flex justify-center mt-4">
+                return (
                   <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                    className="w-8 h-8 border-4 border-gray-600 border-t-neonCyan rounded-full"
-                  />
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <h3 className="text-xl font-semibold mb-4 text-center text-neonCyan">
-                  Participants ({participants.length})
-                </h3>
-                {participants.length === 0 ? (
-                  <div className="text-center py-8">
-                    <div className="animate-pulse text-4xl mb-4">⏳</div>
-                    <p className="text-gray-400">No participants yet...</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-64 overflow-y-auto">
-                    {participants.map((participant, index) => (
-                      <motion.div
-                        key={participant.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.1 }}
-                        className="bg-gray-800 rounded-lg p-3 border border-gray-700 hover:border-neonCyan transition-colors"
+                    key={id || Math.random()}
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileHover={{ scale: 1.02 }}
+                    className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg border border-gray-600 p-6 hover:border-neonPink transition-all duration-300"
+                  >
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-xl font-bold text-neonCyan truncate">
+                        {name || "Unnamed Room"}
+                      </h3>
+                      <button
+                        onClick={() => deleteRoom(id, name || "Unnamed Room")}
+                        className="text-red-400 hover:text-red-300 text-sm opacity-70 hover:opacity-100 transition-opacity"
+                        aria-label="Delete room"
                       >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-gradient-to-r from-neonPink to-neonCyan rounded-full flex items-center justify-center text-black font-bold text-sm">
-                            {(participant.name || participant.email || "A").charAt(0).toUpperCase()}
-                          </div>
-                          <span className="text-sm font-medium truncate">
-                            {participant.name || participant.email || "Anonymous"}
-                          </span>
-                          <div className="ml-auto">
-                            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                        🗑️
+                      </button>
+                    </div>
 
-              <div className="text-center space-y-4">
-                <button
-                  onClick={handleBackToDashboard}
-                  className="text-gray-400 hover:text-white transition-colors underline"
-                >
-                  ← Back to Dashboard
-                </button>
-                
-                {connectionStatus === "disconnected" && (
-                  <p className="text-red-400 text-sm">
-                    ⚠️ Connection lost. Please refresh the page if the issue persists.
-                  </p>
-                )}
-              </div>
-            </motion.section>
+                    <div className="space-y-2 mb-6 text-sm text-gray-300">
+                      <p>
+                        <span className="font-semibold">Code:</span>{" "}
+                        <span className="font-mono text-neonPink">{code || "----"}</span>
+                      </p>
+                      <p>
+                        <span className="font-semibold">Questions:</span> {questionCount || 0}
+                      </p>
+                      <p>
+                        <span className="font-semibold">Time per Q:</span> {timePerQuestion || 30}s
+                      </p>
+                      <p>
+                        <span className="font-semibold">Created:</span> {formattedDate}
+                      </p>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <NeonButton
+                        onClick={() => router.push(`/dashboard/${id}`)}
+                        className="flex-1 bg-purple-600 hover:bg-purple-700 py-2 text-sm"
+                      >
+                        Manage
+                      </NeonButton>
+                      <NeonButton
+                        onClick={() => {
+                          if (code) {
+                            navigator.clipboard.writeText(code).catch(() => {
+                              // Fallback
+                              const textArea = document.createElement("textarea");
+                              textArea.value = code;
+                              document.body.appendChild(textArea);
+                              textArea.select();
+                              document.execCommand('copy');
+                              document.body.removeChild(textArea);
+                            });
+                          }
+                        }}
+                        className="bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm"
+                        disabled={!code}
+                      >
+                        Copy Code
+                      </NeonButton>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
           )}
-        </div>
+        </motion.section>
+
+        {/* Footer */}
+        <motion.footer
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="text-center mt-16 text-gray-500"
+        >
+          <p>Ready to create engaging quizzes? Start by creating a new room!</p>
+        </motion.footer>
       </div>
     </div>
   );
