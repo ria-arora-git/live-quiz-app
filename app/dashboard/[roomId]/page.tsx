@@ -54,16 +54,24 @@ export default function RoomDashboard({
   const isHost = room?.createdBy === user?.id;
 
   // ✅ FIXED: UseSocket fourth parameter!
-  useSocket(roomId, user?.id ?? undefined, user?.firstName ?? undefined, {
+useSocket(
+  roomId,
+  user?.id ?? undefined,
+  user?.firstName ?? undefined,
+  {
     onParticipantsUpdate: (updated: Participant[]) => {
+      console.log("👥 Host dashboard - participants updated:", updated);
       setParticipants(updated);
     },
     onQuizStart: (data: { sessionId?: string }) => {
+      console.log("🚀 Host dashboard - quiz started:", data);
       if (data?.sessionId) {
         router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
       }
-    },
-  });
+    }
+  }
+);
+
 
   // Data loading handlers
   const loadData = useCallback(async () => {
