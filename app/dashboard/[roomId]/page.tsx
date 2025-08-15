@@ -32,11 +32,7 @@ interface Participant {
   clerkId: string;
 }
 
-export default function RoomDashboard({
-  params,
-}: {
-  params: { roomId: string };
-}) {
+export default function RoomDashboard({ params }: { params: { roomId: string } }) {
   const { roomId } = params;
   const { user, isLoaded, isSignedIn } = useUser();
   const router = useRouter();
@@ -53,27 +49,23 @@ export default function RoomDashboard({
 
   const isHost = room?.createdBy === user?.id;
 
-  // ✅ FIXED: UseSocket fourth parameter!
-useSocket(
-  roomId,
-  user?.id ?? undefined,
-  user?.firstName ?? undefined,
-  {
-    onParticipantsUpdate: (updated: Participant[]) => {
-      console.log("👥 Host dashboard - participants updated:", updated);
-      setParticipants(updated);
-    },
-    onQuizStart: (data: { sessionId?: string }) => {
-      console.log("🚀 Host dashboard - quiz started:", data);
-      if (data?.sessionId) {
-        router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
+  // ✅ FIXED: Handlers are passed as fourth argument
+  useSocket(
+    roomId,
+    user?.id ?? undefined,
+    user?.firstName ?? undefined,
+    {
+      onParticipantsUpdate: (updated: Participant[]) => {
+        setParticipants(updated);
+      },
+      onQuizStart: (data: { sessionId?: string }) => {
+        if (data?.sessionId) {
+          router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
+        }
       }
     }
-  }
-);
+  );
 
-
-  // Data loading handlers
   const loadData = useCallback(async () => {
     if (!isLoaded || !isSignedIn) return;
 
@@ -120,7 +112,6 @@ useSocket(
 
   useEffect(() => {
     if (!roomId) return;
-
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/participants?roomId=${roomId}`);
@@ -128,11 +119,8 @@ useSocket(
           const data = await res.json();
           setParticipants(data.participants || []);
         }
-      } catch (error) {
-        // Ignore
-      }
+      } catch (_error) {}
     }, 2000);
-
     return () => clearInterval(interval);
   }, [roomId]);
 
@@ -158,7 +146,6 @@ useSocket(
       setError("Please add at least one question before starting");
       return;
     }
-
     setStartLoading(true);
     setError("");
     try {
@@ -183,9 +170,7 @@ useSocket(
   const copyRoomCode = () => {
     if (!room?.code) return;
     navigator.clipboard.writeText(room.code);
-    const btn = document.querySelector(
-      "[data-copy-button]"
-    ) as HTMLButtonElement;
+    const btn = document.querySelector('[data-copy-button]') as HTMLButtonElement;
     if (btn) {
       const original = btn.textContent;
       btn.textContent = "Copied!";
@@ -201,9 +186,7 @@ useSocket(
         <div className="max-w-md text-center space-y-4">
           <h2 className="text-3xl font-bold text-red-600">Error</h2>
           <p className="text-gray-300">{error}</p>
-          <NeonButton onClick={() => router.push("/dashboard")}>
-            Back to Dashboard
-          </NeonButton>
+          <NeonButton onClick={() => router.push("/dashboard")}>Back to Dashboard</NeonButton>
         </div>
       </div>
     );
@@ -222,8 +205,7 @@ useSocket(
             <div>
               <h1 className="text-3xl font-bold neon-text">{room?.name}</h1>
               <p className="text-gray-300 mt-1">
-                Room Code:{" "}
-                <span className="font-mono text-neon-cyan">{room?.code}</span>
+                Room Code: <span className="font-mono text-neon-cyan">{room?.code}</span>
               </p>
             </div>
             <div>
@@ -253,50 +235,32 @@ useSocket(
                 transition={{ delay: 0.1 }}
                 className="bg-gray-800 p-6 rounded-lg border border-gray-700"
               >
-                <h2 className="text-xl font-bold neon-text mb-4">
-                  Quiz Settings
-                </h2>
+                <h2 className="text-xl font-bold neon-text mb-4">Quiz Settings</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
                   <div>
-                    <label className="block mb-1 text-gray-400 font-semibold">
-                      Number of Questions
-                    </label>
+                    <label className="block mb-1 text-gray-400 font-semibold">Number of Questions</label>
                     <input
                       type="number"
                       min={1}
                       max={50}
                       value={questionCount}
-                      onChange={(e) =>
-                        setQuestionCount(
-                          Math.min(Math.max(1, Number(e.target.value)), 50)
-                        )
-                      }
+                      onChange={(e) => setQuestionCount(Math.min(Math.max(1, Number(e.target.value)), 50))}
                       className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neon-cyan"
                     />
                   </div>
                   <div>
-                    <label className="block mb-1 text-gray-400 font-semibold">
-                      Time per Question (seconds)
-                    </label>
+                    <label className="block mb-1 text-gray-400 font-semibold">Time per Question (seconds)</label>
                     <input
                       type="number"
                       min={5}
                       max={300}
                       value={timePerQuestion}
-                      onChange={(e) =>
-                        setTimePerQuestion(
-                          Math.min(Math.max(5, Number(e.target.value)), 300)
-                        )
-                      }
+                      onChange={(e) => setTimePerQuestion(Math.min(Math.max(5, Number(e.target.value)), 300))}
                       className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neon-cyan"
                     />
                   </div>
                 </div>
-                <NeonButton
-                  onClick={updateSettings}
-                  disabled={saveLoading}
-                  className="px-6 py-2"
-                >
+                <NeonButton onClick={updateSettings} disabled={saveLoading} className="px-6 py-2">
                   {saveLoading ? "Saving..." : "Save Settings"}
                 </NeonButton>
               </motion.section>
@@ -306,12 +270,9 @@ useSocket(
                 transition={{ delay: 0.2 }}
                 className="bg-green-900 p-6 rounded-lg border border-green-700"
               >
-                <h2 className="text-xl font-bold neon-text mb-4">
-                  Ready to Start?
-                </h2>
+                <h2 className="text-xl font-bold neon-text mb-4">Ready to Start?</h2>
                 <p className="mb-4 text-gray-400 font-medium">
-                  Make sure you have added at least one question before
-                  starting.
+                  Make sure you have added at least one question before starting.
                 </p>
                 <div className="flex items-center gap-4">
                   <NeonButton
@@ -322,9 +283,7 @@ useSocket(
                     {startLoading ? "Starting..." : "Start Quiz"}
                   </NeonButton>
                   {questions.length === 0 && (
-                    <span className="text-yellow-400 font-semibold">
-                      No questions added yet
-                    </span>
+                    <span className="text-yellow-400 font-semibold">No questions added yet</span>
                   )}
                 </div>
               </motion.section>
@@ -337,9 +296,7 @@ useSocket(
             transition={{ delay: 0.3 }}
             className="bg-gray-800 p-6 rounded-lg border border-gray-700"
           >
-            <h2 className="text-xl font-bold neon-cyan mb-4">
-              Participants ({participants.length})
-            </h2>
+            <h2 className="text-xl font-bold neon-cyan mb-4">Participants ({participants.length})</h2>
             {participants.length === 0 ? (
               <p className="text-gray-500">No participants have joined yet.</p>
             ) : (
@@ -352,9 +309,7 @@ useSocket(
                     <div className="w-8 h-8 rounded-full bg-gradient-to-r from-neon-pink to-neon-cyan flex items-center justify-center text-black font-bold text-lg">
                       {(name || email || "A")[0].toUpperCase()}
                     </div>
-                    <div className="truncate">
-                      {name || email || "Anonymous"}
-                    </div>
+                    <div className="truncate">{name || email || "Anonymous"}</div>
                   </div>
                 ))}
               </div>
@@ -368,9 +323,7 @@ useSocket(
               transition={{ delay: 0.4 }}
               className="bg-gray-800 p-6 rounded-lg border border-gray-700"
             >
-              <h2 className="text-xl font-bold neon-pink mb-4">
-                Quiz Questions
-              </h2>
+              <h2 className="text-xl font-bold neon-pink mb-4">Quiz Questions</h2>
               <AddQuestionForm
                 roomId={roomId}
                 onAdded={(q) => setQuestions((prev) => [...prev, q])}
@@ -384,9 +337,7 @@ useSocket(
                       key={id}
                       className="bg-gray-900 border border-gray-700 rounded-md p-3"
                     >
-                      <p className="mb-2 font-semibold">{`${
-                        idx + 1
-                      }. ${text}`}</p>
+                      <p className="mb-2 font-semibold">{`${idx + 1}. ${text}`}</p>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         {options.map((option, i) => (
                           <span
