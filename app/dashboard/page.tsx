@@ -22,28 +22,45 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [joinedRoomId, setJoinedRoomId] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<string>("disconnected");
 
   const router = useRouter();
   const { user, isLoaded } = useUser();
 
-  // Socket connection with detailed logging
-  useSocket(
-    joinedRoomId || "",
-    (updated) => {
+  // Socket connection for waiting room
+  const socket = useSocket(joinedRoomId || "", {
+    onParticipantsUpdate: (updated) => {
       console.log("📊 Dashboard participants updated:", updated);
       setParticipants(updated);
     },
-    undefined,
-    (data) => {
-      console.log("🚀 Dashboard received quizStarted:", data);
+    
+    onQuizStart: (data) => {
+      console.log("🚀 Dashboard received quiz start:", data);
       if (data?.sessionId && joinedRoomId) {
         console.log(`🔄 Redirecting to: /quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
         router.push(`/quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
       } else {
-        console.error("❌ Missing sessionId or joinedRoomId:", { sessionId: data?.sessionId, joinedRoomId });
+        console.error("❌ Missing sessionId or joinedRoomId:", { 
+          sessionId: data?.sessionId, 
+          joinedRoomId 
+        });
       }
     }
-  );
+  });
+
+  // Monitor connection status
+  useEffect(() => {
+    if (!socket) {
+      setConnectionStatus("disconnected");
+      return;
+    }
+
+    if (socket.isConnected && socket.isConnected()) {
+      setConnectionStatus("connected");
+    } else {
+      setConnectionStatus("connecting");
+    }
+  }, [socket]);
 
   // Periodically fetch participant list when waiting
   useEffect(() => {
@@ -253,6 +270,18 @@ export default function DashboardPage() {
                   Room ID: {joinedRoomId}
                 </p>
                 
+                {/* Connection Status */}
+                <div className="flex items-center justify-center gap-2 mt-4">
+                  <div className={`w-3 h-3 rounded-full ${
+                    connectionStatus === "connected" ? "bg-green-400" :
+                    connectionStatus === "connecting" ? "bg-yellow-400 animate-pulse" :
+                    "bg-red-400"
+                  }`} />
+                  <span className="text-sm text-gray-400 capitalize">
+                    {connectionStatus}
+                  </span>
+                </div>
+                
                 {/* Loading indicator */}
                 <div className="flex justify-center mt-4">
                   <motion.div
@@ -289,6 +318,9 @@ export default function DashboardPage() {
                           <span className="text-sm font-medium truncate">
                             {participant.name || participant.email || "Anonymous"}
                           </span>
+                          <div className="ml-auto">
+                            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                          </div>
                         </div>
                       </motion.div>
                     ))}
@@ -296,13 +328,19 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="text-center">
+              <div className="text-center space-y-4">
                 <button
                   onClick={handleBackToDashboard}
                   className="text-gray-400 hover:text-white transition-colors underline"
                 >
                   ← Back to Dashboard
                 </button>
+                
+                {connectionStatus === "disconnected" && (
+                  <p className="text-red-400 text-sm">
+                    ⚠️ Connection lost. Please refresh the page if the issue persists.
+                  </p>
+                )}
               </div>
             </motion.section>
           )}

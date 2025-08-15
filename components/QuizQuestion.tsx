@@ -1,35 +1,63 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Question } from "@/types/quiz";
+
+interface Question {
+  id: string;
+  text: string;
+  options: string[];
+  answer?: string;
+}
 
 interface QuizQuestionProps {
   question: Question;
-  onAnswer: (selectedOption: string, timeLeft?: number) => void;
+  onAnswer: (selectedOption: string, timeLeft: number) => void;
   disabled?: boolean;
-  selectedAnswer?: string | null;
+  timeLeft?: number;
 }
 
 export default function QuizQuestion({
   question,
   onAnswer,
   disabled = false,
-  selectedAnswer,
+  timeLeft = 0,
 }: QuizQuestionProps) {
-  const [selected, setSelected] = useState<string | null>(selectedAnswer || null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Reset when question changes
+  useEffect(() => {
+    setSelected(null);
+    setSubmitted(false);
+    setIsSubmitting(false);
+  }, [question.id]);
 
   const handleOptionSelect = (option: string) => {
-    if (disabled || submitted) return;
+    if (disabled || submitted || isSubmitting) return;
     setSelected(option);
   };
 
-  const handleSubmit = () => {
-    if (!selected || disabled || submitted) return;
-    setSubmitted(true);
-    onAnswer(selected);
+  const handleSubmit = async () => {
+    if (!selected || disabled || submitted || isSubmitting) return;
+    
+    setIsSubmitting(true);
+    try {
+      await onAnswer(selected, timeLeft);
+      setSubmitted(true);
+    } catch (error) {
+      console.error("Error submitting answer:", error);
+      setIsSubmitting(false);
+    }
   };
+
+  // Auto-submit when time runs out
+  useEffect(() => {
+    if (timeLeft <= 0 && selected && !submitted && !isSubmitting) {
+      handleSubmit();
+    }
+  }, [timeLeft, selected, submitted, isSubmitting]);
 
   return (
     <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-lg p-8 border border-gray-600 shadow-xl">
@@ -50,30 +78,42 @@ export default function QuizQuestion({
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: index * 0.1 }}
-            whileHover={!disabled && !submitted ? { scale: 1.02 } : {}}
-            whileTap={!disabled && !submitted ? { scale: 0.98 } : {}}
+            whileHover={!disabled && !submitted && !isSubmitting ? { scale: 1.02 } : {}}
+            whileTap={!disabled && !submitted && !isSubmitting ? { scale: 0.98 } : {}}
             onClick={() => handleOptionSelect(option)}
-            disabled={disabled || submitted}
+            disabled={disabled || submitted || isSubmitting}
             className={`
-              p-4 rounded-lg border-2 transition-all duration-200 font-medium text-left
+              relative p-4 rounded-lg border-2 transition-all duration-200 font-medium text-left
               ${
                 selected === option
                   ? "border-neonPink bg-neonPink bg-opacity-20 text-white shadow-lg"
                   : "border-gray-600 bg-gray-800 hover:border-gray-500 hover:bg-gray-700 text-gray-300"
               }
-              ${disabled || submitted ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}
+              ${disabled || submitted || isSubmitting ? "opacity-60 cursor-not-allowed" : "cursor-pointer"}
             `}
           >
             <div className="flex items-center gap-3">
+              {/* Option Letter */}
               <div className={`
-                w-6 h-6 rounded-full border-2 flex items-center justify-center
-                ${selected === option ? "border-neonPink bg-neonPink" : "border-gray-500"}
+                w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-sm
+                ${selected === option ? "border-neonPink bg-neonPink text-black" : "border-gray-500 text-gray-400"}
               `}>
-                {selected === option && (
-                  <div className="w-2 h-2 bg-black rounded-full" />
-                )}
+                {String.fromCharCode(65 + index)}
               </div>
+              
+              {/* Option Text */}
               <span className="flex-1">{option}</span>
+              
+              {/* Selection Indicator */}
+              {selected === option && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="w-6 h-6 bg-neonPink rounded-full flex items-center justify-center"
+                >
+                  <div className="w-2 h-2 bg-black rounded-full" />
+                </motion.div>
+              )}
             </div>
           </motion.button>
         ))}
@@ -82,30 +122,75 @@ export default function QuizQuestion({
       {/* Submit Button */}
       <div className="text-center">
         <motion.button
-          whileHover={selected && !disabled && !submitted ? { scale: 1.05 } : {}}
-          whileTap={selected && !disabled && !submitted ? { scale: 0.95 } : {}}
+          whileHover={selected && !disabled && !submitted && !isSubmitting ? { scale: 1.05 } : {}}
+          whileTap={selected && !disabled && !submitted && !isSubmitting ? { scale: 0.95 } : {}}
           onClick={handleSubmit}
-          disabled={!selected || disabled || submitted}
+          disabled={!selected || disabled || submitted || isSubmitting}
           className={`
             px-8 py-3 rounded-lg font-bold text-lg transition-all duration-200
             ${
-              selected && !disabled && !submitted
+              selected && !disabled && !submitted && !isSubmitting
                 ? "bg-neonCyan text-black hover:bg-cyan-400 shadow-lg"
                 : "bg-gray-600 text-gray-400 cursor-not-allowed"
             }
           `}
         >
-          {submitted ? "Answer Submitted!" : "Submit Answer"}
+          {isSubmitting ? (
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+              Submitting...
+            </div>
+          ) : submitted ? (
+            <div className="flex items-center gap-2">
+              <span>✓</span>
+              Answer Submitted!
+            </div>
+          ) : (
+            "Submit Answer"
+          )}
         </motion.button>
       </div>
 
+      {/* Status Messages */}
       {submitted && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center mt-4 text-green-400 font-medium"
+          className="text-center mt-4"
         >
-          ✓ Your answer has been recorded
+          <div className="bg-green-900 bg-opacity-50 rounded-lg p-3 border border-green-600">
+            <p className="text-green-400 font-medium">
+              ✓ Your answer has been recorded. Waiting for other participants...
+            </p>
+          </div>
+        </motion.div>
+      )}
+
+      {timeLeft <= 10 && timeLeft > 0 && !submitted && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center mt-4"
+        >
+          <div className="bg-red-900 bg-opacity-50 rounded-lg p-3 border border-red-600">
+            <p className="text-red-400 font-medium">
+              ⚠️ Only {timeLeft} seconds left!
+            </p>
+          </div>
+        </motion.div>
+      )}
+
+      {!selected && timeLeft <= 5 && timeLeft > 0 && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center mt-4"
+        >
+          <div className="bg-yellow-900 bg-opacity-50 rounded-lg p-3 border border-yellow-600">
+            <p className="text-yellow-400 font-medium">
+              💡 Select an answer quickly!
+            </p>
+          </div>
         </motion.div>
       )}
     </div>

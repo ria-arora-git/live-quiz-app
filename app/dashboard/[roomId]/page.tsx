@@ -50,20 +50,18 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
   const isHost = room?.createdBy === user?.id;
 
   // Socket connection for real-time updates
-  useSocket(
-    roomId,
-    (updated) => {
+  useSocket(roomId, {
+    onParticipantsUpdate: (updated: Participant[]) => {
       console.log("👥 Host dashboard - participants updated:", updated);
       setParticipants(updated);
     },
-    undefined,
-    (data) => {
+    onQuizStart: (data: { sessionId?: string }) => {
       console.log("🚀 Host dashboard - quiz started:", data);
       if (data?.sessionId) {
         router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
       }
     }
-  );
+  });
 
   useEffect(() => {
     if (!isLoaded) return;

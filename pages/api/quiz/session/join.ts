@@ -20,7 +20,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       user = await prisma.user.create({
         data: {
           clerkId: userId,
-          name: `${clerkUser.firstName ?? ""} ${clerkUser.lastName ?? ""}`.trim() || null,
+          name: `${clerkUser.firstName ?? ""} ${clerkUser.lastName ?? ""}`.trim() || "",
           email: clerkUser.emailAddresses[0]?.emailAddress ?? "",
         },
       });

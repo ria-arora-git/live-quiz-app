@@ -88,19 +88,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponseS
 
     // Emit quiz start event via Socket.IO
     if (res.socket.server.io) {
-      console.log(`📡 Emitting quizStarted to room ${roomId} with sessionId ${session.id}`);
+      console.log(`📡 Emitting startQuiz to Socket.io server`);
       
-      // Emit using the startQuiz event which is handled by socket server
+      // Use the socket server's startQuiz handler
       res.socket.server.io.emit("startQuiz", {
         roomId,
         sessionId: session.id,
-      });
-
-      // Also emit directly to the room
-      res.socket.server.io.to(roomId).emit("quizStarted", {
-        sessionId: session.id,
-        roomId,
-        timestamp: session.startedAt?.toISOString(),
+        timePerQuestion: timePerQuestion || room.timePerQuestion,
       });
 
       console.log(`🎯 Quiz start events emitted for room ${roomId}`);
