@@ -53,7 +53,7 @@ export default function RoomDashboard({
 
   const isHost = room?.createdBy === user?.id;
 
-  // ✅ FIXED: Pass userId and userName as 2nd and 3rd parameters, events as 4th
+  // ✅ CORRECT: Pass userId and userName as 2nd and 3rd parameters, events as 4th
   useSocket(
     roomId,
     user?.id ?? undefined,
@@ -328,7 +328,7 @@ export default function RoomDashboard({
             transition={{ delay: 0.3 }}
             className="bg-gray-800 p-6 rounded-lg border border-gray-700"
           >
-            <h2 className="text-xl font-bold neon-text mb-4">
+            <h2 className="text-xl font-bold text-neonCyan mb-4">
               Participants ({participants.length})
             </h2>
             {participants.length === 0 ? (
@@ -359,7 +359,7 @@ export default function RoomDashboard({
               transition={{ delay: 0.4 }}
               className="bg-gray-800 p-6 rounded-lg border border-gray-700"
             >
-              <h2 className="text-xl font-bold neon-text mb-4">
+              <h2 className="text-xl font-bold text-neonPink mb-4">
                 Quiz Questions
               </h2>
               <AddQuestionForm
