@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -53,22 +53,33 @@ export default function RoomDashboard({
 
   const isHost = room?.createdBy === user?.id;
 
-  // ✅ CORRECT: Pass userId and userName as 2nd and 3rd parameters, events as 4th
-  useSocket(
-    roomId,
-    user?.id ?? undefined,
-    user?.firstName ?? undefined,
-    {
-      onParticipantsUpdate: (updated: Participant[]) => {
-        setParticipants(updated);
-      },
-      onQuizStart: (data: { sessionId?: string }) => {
-        if (data?.sessionId) {
-          router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
-        }
-      },
+  // Stable event handlers to prevent socket reconnections
+  const socketEvents = useMemo(() => ({
+    onParticipantsUpdate: (updated: Participant[]) => {
+      console.log("👥 Host dashboard - participants updated:", updated);
+      setParticipants(updated);
+    },
+    onQuizStart: (data: { sessionId?: string }) => {
+      console.log("🚀 Host dashboard - quiz started:", data);
+      if (data?.sessionId) {
+        router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
+      }
+    },
+  }), [roomId, router]);
+
+  // Only initialize socket when we have all required data
+  const socket = useMemo(() => {
+    if (!roomId || !user?.id || !isLoaded || !isSignedIn) {
+      return null;
     }
-  );
+    
+    return useSocket(
+      roomId,
+      user.id,
+      user.firstName ?? undefined,
+      socketEvents
+    );
+  }, [roomId, user?.id, user?.firstName, isLoaded, isSignedIn, socketEvents]);
 
   const loadData = useCallback(async () => {
     if (!isLoaded || !isSignedIn) return;
@@ -111,8 +122,10 @@ export default function RoomDashboard({
     loadData();
   }, [isLoaded, isSignedIn, loadData, router]);
 
+  // Polling for participants (backup to socket)
   useEffect(() => {
     if (!roomId) return;
+    
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/participants?roomId=${roomId}`);
@@ -120,12 +133,15 @@ export default function RoomDashboard({
           const data = await res.json();
           setParticipants(data.participants || []);
         }
-      } catch {}
-    }, 2000);
+      } catch {
+        // Silent fail - socket should handle this
+      }
+    }, 5000); // Increased to 5 seconds to reduce server load
+
     return () => clearInterval(interval);
   }, [roomId]);
 
-  const updateSettings = async () => {
+  const updateSettings = useCallback(async () => {
     setSaveLoading(true);
     setError("");
     try {
@@ -140,9 +156,9 @@ export default function RoomDashboard({
     } finally {
       setSaveLoading(false);
     }
-  };
+  }, [roomId, questionCount, timePerQuestion]);
 
-  const startQuiz = async () => {
+  const startQuiz = useCallback(async () => {
     if (questions.length === 0) {
       setError("Please add at least one question before starting");
       return;
@@ -166,23 +182,29 @@ export default function RoomDashboard({
     } finally {
       setStartLoading(false);
     }
-  };
+  }, [roomId, questionCount, timePerQuestion, questions.length, router]);
 
-  const copyRoomCode = () => {
+  const copyRoomCode = useCallback(() => {
     if (!room?.code) return;
     navigator.clipboard.writeText(room.code);
-    const btn = document.querySelector(
-      "[data-copy-button]"
-    ) as HTMLButtonElement;
+    const btn = document.querySelector("[data-copy-button]") as HTMLButtonElement;
     if (btn) {
       const original = btn.textContent;
       btn.textContent = "Copied!";
       setTimeout(() => (btn.textContent = original), 2000);
     }
-  };
+  }, [room?.code]);
 
-  if (loading) return <LoadingSpinner />;
+  // Show loading while essential data is loading
+  if (!isLoaded || loading) return <LoadingSpinner />;
 
+  // Redirect if not signed in
+  if (!isSignedIn) {
+    router.replace("/sign-in");
+    return null;
+  }
+
+  // Show error state
   if (error && !room) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-black text-white p-4">
@@ -200,6 +222,7 @@ export default function RoomDashboard({
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white">
       <div className="container mx-auto px-6 py-8">
+        {/* Room Header */}
         <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -212,6 +235,11 @@ export default function RoomDashboard({
                 Room Code:{" "}
                 <span className="font-mono text-neonCyan">{room?.code}</span>
               </p>
+              {socket && (
+                <p className="text-sm text-gray-400 mt-1">
+                  Socket: {socket.isConnected && socket.isConnected() ? "🟢 Connected" : "🔴 Disconnected"}
+                </p>
+              )}
             </div>
             <div>
               <NeonButton
@@ -225,6 +253,7 @@ export default function RoomDashboard({
           </div>
         </motion.header>
 
+        {/* Error Display */}
         {error && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -236,17 +265,17 @@ export default function RoomDashboard({
         )}
 
         <div className="space-y-8 max-w-5xl mx-auto">
+          {/* Host-only sections */}
           {isHost && (
             <>
+              {/* Quiz Settings */}
               <motion.section
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.1 }}
                 className="bg-gray-800 p-6 rounded-lg border border-gray-700"
               >
-                <h2 className="text-xl font-bold neon-text mb-4">
-                  Quiz Settings
-                </h2>
+                <h2 className="text-xl font-bold neon-text mb-4">Quiz Settings</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
                   <div>
                     <label className="block mb-1 text-gray-400 font-semibold">
@@ -291,18 +320,17 @@ export default function RoomDashboard({
                   {saveLoading ? "Saving..." : "Save Settings"}
                 </NeonButton>
               </motion.section>
+
+              {/* Start Quiz Section */}
               <motion.section
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.2 }}
                 className="bg-green-900 p-6 rounded-lg border border-green-700"
               >
-                <h2 className="text-xl font-bold neon-text mb-4">
-                  Ready to Start?
-                </h2>
+                <h2 className="text-xl font-bold neon-text mb-4">Ready to Start?</h2>
                 <p className="mb-4 text-gray-400 font-medium">
-                  Make sure you have added at least one question before
-                  starting.
+                  Make sure you have added at least one question before starting.
                 </p>
                 <div className="flex items-center gap-4">
                   <NeonButton
@@ -322,6 +350,7 @@ export default function RoomDashboard({
             </>
           )}
 
+          {/* Participants Section */}
           <motion.section
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -352,6 +381,7 @@ export default function RoomDashboard({
             )}
           </motion.section>
 
+          {/* Questions Section (Host only) */}
           {isHost && (
             <motion.section
               initial={{ opacity: 0, y: 30 }}
@@ -375,9 +405,7 @@ export default function RoomDashboard({
                       key={id}
                       className="bg-gray-900 border border-gray-700 rounded-md p-3"
                     >
-                      <p className="mb-2 font-semibold">{`${
-                        idx + 1
-                      }. ${text}`}</p>
+                      <p className="mb-2 font-semibold">{`${idx + 1}. ${text}`}</p>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         {options.map((option, i) => (
                           <span
