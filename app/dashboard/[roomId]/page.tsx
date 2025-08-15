@@ -53,17 +53,22 @@ export default function RoomDashboard({
 
   const isHost = room?.createdBy === user?.id;
 
-  // Correct useSocket call: pass events as fourth argument!
-  useSocket(roomId, user?.id ?? undefined, user?.firstName ?? undefined, {
-    onParticipantsUpdate: (updated: Participant[]) => {
-      setParticipants(updated);
-    },
-    onQuizStart: (data: { sessionId?: string }) => {
-      if (data?.sessionId) {
-        router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
-      }
-    },
-  });
+  // ✅ FIXED: Pass userId and userName as 2nd and 3rd parameters, events as 4th
+  useSocket(
+    roomId,
+    user?.id ?? undefined,
+    user?.firstName ?? undefined,
+    {
+      onParticipantsUpdate: (updated: Participant[]) => {
+        setParticipants(updated);
+      },
+      onQuizStart: (data: { sessionId?: string }) => {
+        if (data?.sessionId) {
+          router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
+        }
+      },
+    }
+  );
 
   const loadData = useCallback(async () => {
     if (!isLoaded || !isSignedIn) return;
@@ -124,10 +129,10 @@ export default function RoomDashboard({
     setSaveLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/room`, {
+      const res = await fetch(`/api/room/${roomId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId, questionCount, timePerQuestion }),
+        body: JSON.stringify({ questionCount, timePerQuestion }),
       });
       if (!res.ok) throw new Error("Failed to update settings");
     } catch (err: any) {
@@ -205,7 +210,7 @@ export default function RoomDashboard({
               <h1 className="text-3xl font-bold neon-text">{room?.name}</h1>
               <p className="text-gray-300 mt-1">
                 Room Code:{" "}
-                <span className="font-mono text-neon-cyan">{room?.code}</span>
+                <span className="font-mono text-neonCyan">{room?.code}</span>
               </p>
             </div>
             <div>
@@ -257,7 +262,7 @@ export default function RoomDashboard({
                           Math.min(Math.max(1, Number(e.target.value)), 50)
                         )
                       }
-                      className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neon-cyan"
+                      className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neonCyan"
                     />
                   </div>
                   <div>
@@ -274,7 +279,7 @@ export default function RoomDashboard({
                           Math.min(Math.max(5, Number(e.target.value)), 300)
                         )
                       }
-                      className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neon-cyan"
+                      className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neonCyan"
                     />
                   </div>
                 </div>
@@ -323,7 +328,7 @@ export default function RoomDashboard({
             transition={{ delay: 0.3 }}
             className="bg-gray-800 p-6 rounded-lg border border-gray-700"
           >
-            <h2 className="text-xl font-bold neon-cyan mb-4">
+            <h2 className="text-xl font-bold neon-text mb-4">
               Participants ({participants.length})
             </h2>
             {participants.length === 0 ? (
@@ -335,7 +340,7 @@ export default function RoomDashboard({
                     key={id}
                     className="bg-gray-900 rounded-md p-3 border border-gray-700 flex items-center gap-3"
                   >
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-neon-pink to-neon-cyan flex items-center justify-center text-black font-bold text-lg">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-neonPink to-neonCyan flex items-center justify-center text-black font-bold text-lg">
                       {(name || email || "A")[0].toUpperCase()}
                     </div>
                     <div className="truncate">
@@ -354,7 +359,7 @@ export default function RoomDashboard({
               transition={{ delay: 0.4 }}
               className="bg-gray-800 p-6 rounded-lg border border-gray-700"
             >
-              <h2 className="text-xl font-bold neon-pink mb-4">
+              <h2 className="text-xl font-bold neon-text mb-4">
                 Quiz Questions
               </h2>
               <AddQuestionForm

@@ -27,11 +27,11 @@ export default function DashboardPage() {
   const router = useRouter();
   const { user, isLoaded } = useUser();
 
-  // Socket connection for waiting room
+  // ✅ FIXED: Socket connection for waiting room with correct parameter order
   const socket = useSocket(
     joinedRoomId || "",
-    user?.id,
-    user?.firstName || user?.emailAddresses?.[0]?.emailAddress,
+    user?.id ?? undefined,
+    user?.firstName ?? undefined,
     {
       onParticipantsUpdate: (updated: Participant[]) => {
         console.log("📊 Dashboard participants updated:", updated);
