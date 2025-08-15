@@ -28,25 +28,30 @@ export default function DashboardPage() {
   const { user, isLoaded } = useUser();
 
   // Socket connection for waiting room
-  const socket = useSocket(joinedRoomId || "", {
-    onParticipantsUpdate: (updated) => {
-      console.log("📊 Dashboard participants updated:", updated);
-      setParticipants(updated);
-    },
-    
-    onQuizStart: (data) => {
-      console.log("🚀 Dashboard received quiz start:", data);
-      if (data?.sessionId && joinedRoomId) {
-        console.log(`🔄 Redirecting to: /quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
-        router.push(`/quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
-      } else {
-        console.error("❌ Missing sessionId or joinedRoomId:", { 
-          sessionId: data?.sessionId, 
-          joinedRoomId 
-        });
+  const socket = useSocket(
+    joinedRoomId || "",
+    user?.id,
+    user?.firstName || user?.emailAddresses?.[0]?.emailAddress,
+    {
+      onParticipantsUpdate: (updated: Participant[]) => {
+        console.log("📊 Dashboard participants updated:", updated);
+        setParticipants(updated);
+      },
+
+      onQuizStart: (data: { sessionId?: string }) => {
+        console.log("🚀 Dashboard received quiz start:", data);
+        if (data?.sessionId && joinedRoomId) {
+          console.log(`🔄 Redirecting to: /quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
+          router.push(`/quiz/${joinedRoomId}?sessionId=${data.sessionId}`);
+        } else {
+          console.error("❌ Missing sessionId or joinedRoomId:", {
+            sessionId: data?.sessionId,
+            joinedRoomId
+          });
+        }
       }
     }
-  });
+  );
 
   // Monitor connection status
   useEffect(() => {
