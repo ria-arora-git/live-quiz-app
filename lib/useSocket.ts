@@ -21,6 +21,7 @@ interface SocketMethods {
   submitAnswer: (data: any) => void;
   startQuiz: (data: any) => void;
   endQuiz: (data: any) => void;
+  nextQuestion: (data: any) => void;
   isConnected: () => boolean;
   disconnect: () => void;
 }
@@ -37,6 +38,7 @@ const useSocket = (
   const userIdRef = useRef(userId);
   const userNameRef = useRef(userName);
 
+  // Update refs when props change
   useEffect(() => {
     roomIdRef.current = roomId;
     userIdRef.current = userId;
@@ -56,6 +58,7 @@ const useSocket = (
 
     try {
       const socket = io(serverUrl, {
+        path: "/api/socket",
         transports: ["websocket", "polling"],
         timeout: 20000,
         reconnection: true,
@@ -69,6 +72,8 @@ const useSocket = (
       socket.on("connect", () => {
         console.log("🟢 Connected to socket server:", socket.id);
         setIsConnected(true);
+        
+        // Auto-join room when connected
         if (roomIdRef.current && userIdRef.current) {
           socket.emit("joinRoom", {
             roomId: roomIdRef.current,
@@ -89,67 +94,61 @@ const useSocket = (
         events.onError?.(`Connection failed: ${error.message}`);
       });
 
-      if (events.onRoomJoined)
-        socket.on("roomJoined", data => {
-          console.log("✅ Room joined:", data);
-          events.onRoomJoined!(data);
-        });
+      // Room events
+      socket.on("roomJoined", (data) => {
+        console.log("✅ Room joined:", data);
+        events.onRoomJoined?.(data);
+      });
 
-      if (events.onParticipantsUpdate)
-        socket.on("participantsUpdate", data => {
-          console.log("👥 Participants updated:", data);
-          events.onParticipantsUpdate!(Array.isArray(data) ? data : []);
-        });
+      socket.on("updateParticipants", (data) => {
+        console.log("👥 Participants updated:", data);
+        const participants = Array.isArray(data) ? data : [];
+        events.onParticipantsUpdate?.(participants);
+      });
 
-      if (events.onQuizStart)
-        socket.on("quizStarted", data => {
-          console.log("🚀 Quiz started:", data);
-          events.onQuizStart!(data || {});
-        });
+      // Quiz events
+      socket.on("quizStarted", (data) => {
+        console.log("🚀 Quiz started:", data);
+        events.onQuizStart?.(data || {});
+      });
 
-      if (events.onQuizState)
-        socket.on("quizState", data => {
-          console.log("📊 Quiz state:", data);
-          events.onQuizState!(data || {});
-        });
+      socket.on("quizState", (data) => {
+        console.log("📊 Quiz state:", data);
+        events.onQuizState?.(data || {});
+      });
 
-      if (events.onQuestionUpdate)
-        socket.on("questionUpdate", data => {
-          console.log("❓ Question update:", data);
-          events.onQuestionUpdate!(data || {});
-        });
+      socket.on("questionUpdate", (data) => {
+        console.log("❓ Question update:", data);
+        events.onQuestionUpdate?.(data || {});
+      });
 
-      if (events.onQuestionChange)
-        socket.on("questionChange", data => {
-          console.log("🔄 Question changed:", data);
-          events.onQuestionChange!(data || {});
-        });
+      socket.on("questionChanged", (data) => {
+        console.log("🔄 Question changed:", data);
+        events.onQuestionChange?.(data || {});
+      });
 
-      if (events.onAnswerSubmitted)
-        socket.on("answerSubmitted", data => {
-          console.log("✍️ Answer submitted:", data);
-          events.onAnswerSubmitted!(data || {});
-        });
+      socket.on("answerSubmitted", (data) => {
+        console.log("✍️ Answer submitted:", data);
+        events.onAnswerSubmitted?.(data || {});
+      });
 
-      if (events.onQuizEnd)
-        socket.on("quizEnded", data => {
-          console.log("🏁 Quiz ended:", data);
-          events.onQuizEnd!(data || {});
-        });
+      socket.on("quizEnded", (data) => {
+        console.log("🏁 Quiz ended:", data);
+        events.onQuizEnd?.(data || {});
+      });
 
-      if (events.onLeaderboardUpdate)
-        socket.on("leaderboardUpdate", data => {
-          console.log("🏆 Leaderboard updated:", data);
-          events.onLeaderboardUpdate!(data || {});
-        });
+      socket.on("leaderboardUpdate", (data) => {
+        console.log("🏆 Leaderboard updated:", data);
+        const leaderboard = Array.isArray(data) ? data : [];
+        events.onLeaderboardUpdate?.(leaderboard);
+      });
 
-      if (events.onTimeUp)
-        socket.on("timeUp", () => {
-          console.log("⏲️ Time up");
-          events.onTimeUp!();
-        });
+      socket.on("timeUp", () => {
+        console.log("⏲️ Time up");
+        events.onTimeUp?.();
+      });
 
-      socket.on("error", error => {
+      socket.on("error", (error) => {
         console.error("⚠️ Socket error:", error);
         events.onError?.(error?.message || "Unknown socket error");
       });
@@ -171,7 +170,10 @@ const useSocket = (
   // Socket methods
   const joinRoom = useCallback((roomId: string, userId?: string, userName?: string) => {
     const socket = socketRef.current;
-    if (!socket) { console.warn("⚠️ Socket not connected"); return; }
+    if (!socket?.connected) {
+      console.warn("⚠️ Socket not connected");
+      return;
+    }
 
     try {
       console.log("🏠 Joining room:", { roomId, userId, userName });
@@ -184,19 +186,20 @@ const useSocket = (
 
   const leaveRoom = useCallback((roomId: string) => {
     const socket = socketRef.current;
-    if (!socket) { console.warn("⚠️ Socket not connected"); return; }
+    if (!socket?.connected) return;
+    
     try {
       console.log("🚪 Leaving room:", roomId);
       socket.emit("leaveRoom", { roomId });
     } catch (error) {
       console.error("❌ Failed to leave room:", error);
-      events.onError?.("Failed to leave room");
     }
-  }, [events.onError]);
+  }, []);
 
   const submitAnswer = useCallback((data: any) => {
     const socket = socketRef.current;
-    if (!socket) { console.warn("⚠️ Socket not connected"); return; }
+    if (!socket?.connected) return;
+    
     try {
       console.log("📝 Submitting answer:", data);
       socket.emit("submitAnswer", data);
@@ -208,7 +211,8 @@ const useSocket = (
 
   const startQuiz = useCallback((data: any) => {
     const socket = socketRef.current;
-    if (!socket) { console.warn("⚠️ Socket not connected"); return; }
+    if (!socket?.connected) return;
+    
     try {
       console.log("🎯 Starting quiz:", data);
       socket.emit("startQuiz", data);
@@ -218,16 +222,29 @@ const useSocket = (
     }
   }, [events.onError]);
 
-  // END QUIZ SUPPORT
   const endQuiz = useCallback((data: any) => {
     const socket = socketRef.current;
-    if (!socket) { console.warn("⚠️ Socket not connected"); return; }
+    if (!socket?.connected) return;
+    
     try {
       console.log("🛑 Ending quiz:", data);
       socket.emit("endQuiz", data);
     } catch (error) {
       console.error("❌ Failed to end quiz:", error);
       events.onError?.("Failed to end quiz");
+    }
+  }, [events.onError]);
+
+  const nextQuestion = useCallback((data: any) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) return;
+    
+    try {
+      console.log("➡️ Next question:", data);
+      socket.emit("nextQuestion", data);
+    } catch (error) {
+      console.error("❌ Failed to advance question:", error);
+      events.onError?.("Failed to advance question");
     }
   }, [events.onError]);
 
@@ -255,6 +272,7 @@ const useSocket = (
     submitAnswer,
     startQuiz,
     endQuiz,
+    nextQuestion,
     isConnected: checkIsConnected,
     disconnect,
   };

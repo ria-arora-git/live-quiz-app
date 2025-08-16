@@ -9,25 +9,20 @@ export const config = {
   },
 };
 
-export default function handler(
-  _req: NextApiRequest,
-  res: NextApiResponseServerIO
-) {
+export default function handler(req: NextApiRequest, res: NextApiResponseServerIO) {
   if (!res.socket.server.io) {
     console.log("🔌 Initializing Socket.IO server...");
-
+    
     const io = new IOServer(res.socket.server, {
       path: "/api/socket",
       addTrailingSlash: false,
       cors: {
-        origin:
-          process.env.NODE_ENV === "production"
-            ? [process.env.NEXT_PUBLIC_APP_URL || ""]
-            : ["http://localhost:3000", "http://127.0.0.1:3000"],
+        origin: process.env.NODE_ENV === "production" 
+          ? [process.env.NEXT_PUBLIC_APP_URL || ""] 
+          : ["http://localhost:3000", "http://127.0.0.1:3000"],
         methods: ["GET", "POST"],
         credentials: true,
       },
-
       transports: ["websocket", "polling"],
       pingTimeout: 60000,
       pingInterval: 25000,
@@ -37,21 +32,38 @@ export default function handler(
     // Track active rooms and their state
     const roomStates = new Map();
     const questionTimers = new Map();
+    const connectionCounts = new Map();
+    const MAX_CONNECTIONS_PER_IP = 10;
 
+    // Connection handling
     io.on("connection", (socket) => {
-      console.log(`🟢 Client connected: ${socket.id}`);
-
-      // Join room
-      socket.on("joinRoom", async (roomId: string) => {
+      const clientIP = socket.handshake.address;
+      
+      // Rate limiting
+      const currentConnections = connectionCounts.get(clientIP) || 0;
+      if (currentConnections >= MAX_CONNECTIONS_PER_IP) {
+        console.warn(`⚠️ Rate limit exceeded for IP: ${clientIP}`);
+        socket.emit('error', { message: 'Too many connections from this IP' });
+        socket.disconnect(true);
+        return;
+      }
+      
+      connectionCounts.set(clientIP, currentConnections + 1);
+      console.log(`🟢 Client connected: ${socket.id} from ${clientIP}`);
+      
+      // Join room with validation
+      socket.on("joinRoom", async (data) => {
         try {
-          if (!roomId || typeof roomId !== "string") {
-            socket.emit("error", { message: "Invalid room ID" });
+          const { roomId, userId, userName } = data || {};
+          
+          if (!roomId || typeof roomId !== 'string' || roomId.length > 50) {
+            socket.emit('error', { message: 'Invalid room ID' });
             return;
           }
-
+          
           socket.join(roomId);
           console.log(`📥 ${socket.id} joined room ${roomId}`);
-
+          
           // Initialize room state if not exists
           if (!roomStates.has(roomId)) {
             roomStates.set(roomId, {
@@ -64,30 +76,39 @@ export default function handler(
           }
 
           const roomState = roomStates.get(roomId);
-          roomState.participants.add(socket.id);
-
+          if (roomState) {
+            roomState.participants.add(socket.id);
+          }
+          
+          // Get and broadcast updated participant list
+          await broadcastParticipants(io, roomId);
+          
           // Send current room state to joined user
           socket.emit("roomJoined", {
             roomId,
             socketId: socket.id,
             currentState: {
-              isQuizActive: roomState.isQuizActive,
-              currentQuestionIndex: roomState.currentQuestionIndex,
-              questionStartTime: roomState.questionStartTime,
+              isQuizActive: roomState?.isQuizActive || false,
+              currentQuestionIndex: roomState?.currentQuestionIndex || 0,
+              questionStartTime: roomState?.questionStartTime,
             },
           });
-
-          // Broadcast updated participant count
-          await broadcastParticipants(io, roomId);
         } catch (error) {
-          console.error("❌ Error joining room:", error);
+          console.error('❌ Error joining room:', error);
+          socket.emit('error', { message: 'Failed to join room' });
         }
       });
 
-      // Start quiz (host only)
+      // Handle quiz start broadcasting
       socket.on("startQuiz", async (data) => {
         try {
-          const { roomId, sessionId, timePerQuestion } = data;
+          const { roomId, sessionId, timePerQuestion } = data || {};
+          
+          if (!roomId) {
+            console.error("❌ Missing roomId in startQuiz event");
+            return;
+          }
+          
           console.log(`🎯 Starting quiz for room ${roomId}`);
 
           const roomState = roomStates.get(roomId);
@@ -114,7 +135,7 @@ export default function handler(
               question: {
                 id: firstQuestion.id,
                 text: firstQuestion.text,
-                options: firstQuestion.options,
+                options: Array.isArray(firstQuestion.options) ? firstQuestion.options : [],
                 index: 0,
                 total: questions.length,
               },
@@ -124,39 +145,57 @@ export default function handler(
 
             // Start question timer
             startQuestionTimer(io, roomId, questions, 0);
+          } else {
+            socket.emit('error', { message: 'No questions available for this quiz' });
           }
         } catch (error) {
-          console.error("❌ Error starting quiz:", error);
+          console.error('❌ Error broadcasting quiz start:', error);
+          socket.emit('error', { message: 'Failed to start quiz' });
         }
       });
 
       // Submit answer
       socket.on("submitAnswer", async (data) => {
         try {
-          const { roomId, questionId, selectedOption, timeLeft } = data;
+          const { roomId, questionId, selectedOption, timeLeft, userId } = data || {};
 
+          if (!roomId || !questionId || !userId) {
+            socket.emit('error', { message: 'Invalid answer data' });
+            return;
+          }
+
+          console.log(`✅ Answer submitted by ${userId} for question ${questionId}`);
+          
           // Broadcast that user submitted answer (for UI feedback)
           socket.to(roomId).emit("userAnswered", {
             socketId: socket.id,
+            userId,
             questionId,
-            timeLeft,
+            timeLeft: timeLeft || 0,
           });
 
           // Acknowledge submission to sender
           socket.emit("answerSubmitted", {
             questionId,
             selectedOption,
-            timeLeft,
+            timeLeft: timeLeft || 0,
           });
         } catch (error) {
           console.error("❌ Error submitting answer:", error);
+          socket.emit('error', { message: 'Failed to submit answer' });
         }
       });
 
       // Next question (host only)
       socket.on("nextQuestion", async (data) => {
         try {
-          const { roomId } = data;
+          const { roomId } = data || {};
+          
+          if (!roomId) {
+            socket.emit('error', { message: 'Invalid room ID' });
+            return;
+          }
+
           const roomState = roomStates.get(roomId);
 
           if (roomState && roomState.isQuizActive) {
@@ -175,7 +214,7 @@ export default function handler(
                 question: {
                   id: nextQuestion.id,
                   text: nextQuestion.text,
-                  options: nextQuestion.options,
+                  options: Array.isArray(nextQuestion.options) ? nextQuestion.options : [],
                   index: roomState.currentQuestionIndex,
                   total: questions.length,
                 },
@@ -197,30 +236,49 @@ export default function handler(
           }
         } catch (error) {
           console.error("❌ Error changing question:", error);
+          socket.emit('error', { message: 'Failed to change question' });
         }
       });
 
       // End quiz (host only)
       socket.on("endQuiz", async (data) => {
         try {
-          const { roomId } = data;
+          const { roomId } = data || {};
+          
+          if (!roomId) {
+            socket.emit('error', { message: 'Invalid room ID' });
+            return;
+          }
+
           await endQuiz(io, roomId);
         } catch (error) {
           console.error("❌ Error ending quiz:", error);
+          socket.emit('error', { message: 'Failed to end quiz' });
         }
       });
 
-      // Handle disconnection
-      socket.on("disconnect", () => {
-        console.log(`🔴 Client disconnected: ${socket.id}`);
+      // Disconnect handling
+      socket.on("disconnect", (reason) => {
+        const clientIP = socket.handshake.address;
+        const currentConnections = connectionCounts.get(clientIP) || 0;
+        connectionCounts.set(clientIP, Math.max(0, currentConnections - 1));
+        
+        console.log(`🔴 Client disconnected: ${socket.id}, reason: ${reason}`);
 
         // Remove from all room states
         for (const [roomId, roomState] of roomStates.entries()) {
-          if (roomState.participants.has(socket.id)) {
+          if (roomState?.participants?.has(socket.id)) {
             roomState.participants.delete(socket.id);
-            broadcastParticipants(io, roomId);
+            broadcastParticipants(io, roomId).catch(err => 
+              console.error('Error broadcasting participants on disconnect:', err)
+            );
           }
         }
+      });
+
+      // Error handling
+      socket.on("error", (error) => {
+        console.error(`❌ Socket error for ${socket.id}:`, error);
       });
     });
 
@@ -232,54 +290,60 @@ export default function handler(
       questionIndex: number
     ) {
       const roomState = roomStates.get(roomId);
-      if (!roomState) return;
+      if (!roomState || !Array.isArray(questions)) return;
 
       // Clear existing timer
       if (questionTimers.has(roomId)) {
         clearTimeout(questionTimers.get(roomId));
       }
 
-      const timeLimit = roomState.timePerQuestion * 1000;
+      const timeLimit = (roomState.timePerQuestion || 30) * 1000;
 
       const timer = setTimeout(async () => {
-        // Time's up for current question
-        io.to(roomId).emit("timeUp", {
-          questionIndex,
-          timestamp: new Date().toISOString(),
-        });
+        try {
+          // Time's up for current question
+          io.to(roomId).emit("timeUp", {
+            questionIndex,
+            timestamp: new Date().toISOString(),
+          });
 
-        // Auto-advance to next question after 3 seconds
-        setTimeout(async () => {
-          roomState.currentQuestionIndex++;
+          // Auto-advance to next question after 3 seconds
+          setTimeout(async () => {
+            if (!roomState.isQuizActive) return;
 
-          if (roomState.currentQuestionIndex < questions.length) {
-            const nextQuestion = questions[roomState.currentQuestionIndex];
-            roomState.questionStartTime = Date.now();
+            roomState.currentQuestionIndex++;
 
-            io.to(roomId).emit("questionChanged", {
-              question: {
-                id: nextQuestion.id,
-                text: nextQuestion.text,
-                options: nextQuestion.options,
-                index: roomState.currentQuestionIndex,
-                total: questions.length,
-              },
-              timePerQuestion: roomState.timePerQuestion,
-              timestamp: new Date().toISOString(),
-            });
+            if (roomState.currentQuestionIndex < questions.length) {
+              const nextQuestion = questions[roomState.currentQuestionIndex];
+              roomState.questionStartTime = Date.now();
 
-            // Start timer for next question
-            startQuestionTimer(
-              io,
-              roomId,
-              questions,
-              roomState.currentQuestionIndex
-            );
-          } else {
-            // Quiz finished
-            await endQuiz(io, roomId);
-          }
-        }, 3000);
+              io.to(roomId).emit("questionChanged", {
+                question: {
+                  id: nextQuestion.id,
+                  text: nextQuestion.text,
+                  options: Array.isArray(nextQuestion.options) ? nextQuestion.options : [],
+                  index: roomState.currentQuestionIndex,
+                  total: questions.length,
+                },
+                timePerQuestion: roomState.timePerQuestion,
+                timestamp: new Date().toISOString(),
+              });
+
+              // Start timer for next question
+              startQuestionTimer(
+                io,
+                roomId,
+                questions,
+                roomState.currentQuestionIndex
+              );
+            } else {
+              // Quiz finished
+              await endQuiz(io, roomId);
+            }
+          }, 3000);
+        } catch (error) {
+          console.error('Error in question timer:', error);
+        }
       }, timeLimit);
 
       questionTimers.set(roomId, timer);
@@ -312,27 +376,25 @@ export default function handler(
           },
         });
 
-        let leaderboard: {
+        let leaderboard: Array<{
           userId: string;
           name: string;
           score: number;
           rank: number;
-        }[] = [];
-        let userStats: Record<
-          string,
-          {
-            score: number;
-            correct: number;
-            total: number;
-            accuracy: number;
-          }
-        > = {};
+        }> = [];
+        
+        let userStats: Record<string, {
+          score: number;
+          correct: number;
+          total: number;
+          accuracy: number;
+        }> = {};
 
-        if (session?.results) {
+        if (session?.results && Array.isArray(session.results)) {
           leaderboard = session.results.map((result: any, index: number) => ({
-            userId: result.userId,
-            name: result.user.name || result.user.email || "Anonymous",
-            score: result.score,
+            userId: result.userId || "",
+            name: result.user?.name || result.user?.email || "Anonymous",
+            score: result.score || 0,
             rank: index + 1,
           }));
 
@@ -344,7 +406,7 @@ export default function handler(
             const totalQuestions = Object.keys(answers || {}).length;
 
             acc[result.userId] = {
-              score: result.score,
+              score: result.score || 0,
               correct: correctCount,
               total: totalQuestions,
               accuracy:
@@ -377,34 +439,42 @@ export default function handler(
       }
     }
 
-    // Helper function to broadcast participants
-    async function broadcastParticipants(io: IOServer, roomId: string) {
-      try {
-        const session = await prisma.quizSession.findFirst({
-          where: { roomId },
-          orderBy: { createdAt: "desc" },
-        });
-
-        if (!session) return;
-
-        const participants = await prisma.user.findMany({
-          where: { clerkId: { in: session.participants } },
-          select: {
-            id: true,
-            clerkId: true,
-            name: true,
-            email: true,
-          },
-        });
-
-        io.to(roomId).emit("updateParticipants", participants);
-      } catch (error) {
-        console.error("❌ Error broadcasting participants:", error);
-      }
-    }
-
     res.socket.server.io = io;
   }
-
+  
   res.end();
+}
+
+// Helper function to broadcast participant updates
+async function broadcastParticipants(io: IOServer, roomId: string) {
+  try {
+    // Get active session for the room
+    const session = await prisma.quizSession.findFirst({
+      where: { roomId },
+      orderBy: { createdAt: "desc" }
+    });
+
+    if (!session || !Array.isArray(session.participants)) {
+      console.warn(`No valid session found for room ${roomId}`);
+      return;
+    }
+
+    // Get participant details
+    const participants = await prisma.user.findMany({
+      where: { clerkId: { in: session.participants } },
+      select: {
+        id: true,
+        clerkId: true,
+        name: true,
+        email: true,
+      }
+    });
+
+    const validParticipants = Array.isArray(participants) ? participants : [];
+    console.log(`📊 Broadcasting ${validParticipants.length} participants to room ${roomId}`);
+    
+    io.to(roomId).emit("updateParticipants", validParticipants);
+  } catch (error) {
+    console.error("❌ Error broadcasting participants:", error);
+  }
 }

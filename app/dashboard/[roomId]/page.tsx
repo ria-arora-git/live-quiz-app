@@ -16,6 +16,8 @@ interface Room {
   createdBy: string;
   questionCount: number;
   timePerQuestion: number;
+  isActive: boolean;
+  maxParticipants: number;
 }
 
 interface Question {
@@ -23,6 +25,7 @@ interface Question {
   text: string;
   options: string[];
   answer: string;
+  order: number;
 }
 
 interface Participant {
@@ -49,7 +52,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
 
   const isHost = room?.createdBy === user?.id;
 
-  // Stable event handlers to prevent socket reconnections
+  // Stable socket event handlers
   const socketEvents = useMemo(
     () => ({
       onParticipantsUpdate: (updated: Participant[]) => {
@@ -57,17 +60,23 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
         const validParticipants = Array.isArray(updated) ? updated : [];
         setParticipants(validParticipants);
       },
+      
       onQuizStart: (data: { sessionId?: string }) => {
         console.log("🚀 Host dashboard - quiz started:", data);
         if (data?.sessionId && roomId) {
           router.push(`/quiz/${roomId}?sessionId=${data.sessionId}`);
         }
       },
+
+      onError: (error: string) => {
+        console.error("❌ Socket error:", error);
+        setError(`Connection error: ${error}`);
+      },
     }),
     [roomId, router]
   );
 
-  // Only initialize socket when prerequisites are met
+  // Initialize socket connection
   const socket = useMemo(() => {
     if (!roomId || !user?.id || !isLoaded || !isSignedIn) {
       return null;
@@ -81,6 +90,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     }
   }, [roomId, user?.id, user?.firstName, isLoaded, isSignedIn, socketEvents]);
 
+  // Load room, questions, and participants data
   const loadData = useCallback(async () => {
     if (!isLoaded || !isSignedIn || !roomId) return;
 
@@ -103,26 +113,39 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
       }
 
       // Load questions
-      const questionsRes = await fetch(`/api/question/list?roomId=${roomId}`);
-      if (questionsRes.ok) {
-        const questionsData = await questionsRes.json();
-        const validQuestions = Array.isArray(questionsData) ? questionsData : [];
-        setQuestions(validQuestions);
-      } else {
+      try {
+        const questionsRes = await fetch(`/api/question/list?roomId=${roomId}`);
+        if (questionsRes.ok) {
+          const questionsData = await questionsRes.json();
+          const validQuestions = Array.isArray(questionsData) ? questionsData : [];
+          setQuestions(validQuestions);
+        } else {
+          console.warn("Failed to load questions");
+          setQuestions([]);
+        }
+      } catch (err) {
+        console.warn("Questions load error:", err);
         setQuestions([]);
       }
 
       // Load participants
-      const participantsRes = await fetch(`/api/participants?roomId=${roomId}`);
-      if (participantsRes.ok) {
-        const participantsData = await participantsRes.json();
-        const validParticipants = Array.isArray(participantsData?.participants) 
-          ? participantsData.participants 
-          : [];
-        setParticipants(validParticipants);
-      } else {
+      try {
+        const participantsRes = await fetch(`/api/participants?roomId=${roomId}`);
+        if (participantsRes.ok) {
+          const participantsData = await participantsRes.json();
+          const validParticipants = Array.isArray(participantsData?.participants) 
+            ? participantsData.participants 
+            : [];
+          setParticipants(validParticipants);
+        } else {
+          console.warn("Failed to load participants");
+          setParticipants([]);
+        }
+      } catch (err) {
+        console.warn("Participants load error:", err);
         setParticipants([]);
       }
+
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "An unknown error occurred";
       console.error("Load data error:", err);
@@ -141,7 +164,7 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     loadData();
   }, [isLoaded, isSignedIn, loadData, router]);
 
-  // Polling participants as a fallback
+  // Polling participants as fallback
   useEffect(() => {
     if (!roomId) return;
 
@@ -156,7 +179,6 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
           setParticipants(validParticipants);
         }
       } catch (err) {
-        // Silently ignore polling errors
         console.warn("Participant polling error:", err);
       }
     }, 5000);
@@ -164,8 +186,9 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     return () => clearInterval(interval);
   }, [roomId]);
 
+  // Update room settings
   const updateSettings = useCallback(async () => {
-    if (!roomId) return;
+    if (!roomId || !isHost) return;
     
     setSaveLoading(true);
     setError("");
@@ -174,25 +197,41 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
       const res = await fetch(`/api/room/${roomId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questionCount, timePerQuestion }),
+        body: JSON.stringify({ 
+          questionCount: Math.max(1, Math.min(50, questionCount)),
+          timePerQuestion: Math.max(5, Math.min(300, timePerQuestion))
+        }),
       });
       
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({ error: "Failed to update settings" }));
         throw new Error(errorData.error || "Failed to update settings");
       }
+
+      // Update local room state
+      if (room) {
+        setRoom({
+          ...room,
+          questionCount,
+          timePerQuestion
+        });
+      }
+      
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to update settings";
       setError(errorMessage);
     } finally {
       setSaveLoading(false);
     }
-  }, [roomId, questionCount, timePerQuestion]);
+  }, [roomId, questionCount, timePerQuestion, room, isHost]);
 
+  // Start quiz
   const startQuiz = useCallback(async () => {
-    if (!roomId) return;
+    if (!roomId || !isHost) return;
     
-    const questionsLength = questions?.length ?? 0;
+    const safeQuestions = Array.isArray(questions) ? questions : [];
+    const questionsLength = safeQuestions.length;
+    
     if (questionsLength === 0) {
       setError("Please add at least one question before starting");
       return;
@@ -205,7 +244,11 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
       const res = await fetch(`/api/room/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId, questionCount, timePerQuestion }),
+        body: JSON.stringify({ 
+          roomId, 
+          questionCount: Math.min(questionCount, questionsLength),
+          timePerQuestion 
+        }),
       });
       
       if (!res.ok) {
@@ -225,13 +268,29 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     } finally {
       setStartLoading(false);
     }
-  }, [roomId, questionCount, timePerQuestion, questions, router]);
+  }, [roomId, questionCount, timePerQuestion, questions, router, isHost]);
 
-  const copyRoomCode = useCallback(() => {
+  // Copy room code
+  const copyRoomCode = useCallback(async () => {
     const code = room?.code;
     if (!code) return;
     
-    navigator.clipboard.writeText(code).catch(() => {
+    try {
+      await navigator.clipboard.writeText(code);
+      
+      const btn = document.querySelector("[data-copy-button]") as HTMLButtonElement;
+      if (btn) {
+        const original = btn.textContent;
+        btn.textContent = "Copied!";
+        btn.classList.add("bg-green-600");
+        setTimeout(() => {
+          if (btn) {
+            btn.textContent = original;
+            btn.classList.remove("bg-green-600");
+          }
+        }, 2000);
+      }
+    } catch (error) {
       // Fallback for older browsers
       const textArea = document.createElement("textarea");
       textArea.value = code;
@@ -239,24 +298,40 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
       textArea.select();
       document.execCommand('copy');
       document.body.removeChild(textArea);
-    });
-    
-    const btn = document.querySelector("[data-copy-button]") as HTMLButtonElement;
-    if (btn) {
-      const original = btn.textContent;
-      btn.textContent = "Copied!";
-      setTimeout(() => {
-        if (btn) btn.textContent = original;
-      }, 2000);
     }
   }, [room?.code]);
 
+  // Add question callback
   const addQuestion = useCallback((newQuestion: Question) => {
     setQuestions(prev => {
       const currentQuestions = Array.isArray(prev) ? prev : [];
       return [...currentQuestions, newQuestion];
     });
   }, []);
+
+  // Delete question
+  const deleteQuestion = useCallback(async (questionId: string, questionText: string) => {
+    if (!isHost) return;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete this question: "${questionText.substring(0, 50)}..."?`
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/question/delete?questionId=${questionId}`, {
+        method: "DELETE"
+      });
+
+      if (res.ok) {
+        setQuestions(prev => (Array.isArray(prev) ? prev : []).filter(q => q.id !== questionId));
+      } else {
+        throw new Error("Failed to delete question");
+      }
+    } catch (error) {
+      setError("Failed to delete question");
+    }
+  }, [isHost]);
 
   // Early returns for loading and auth states
   if (!isLoaded || loading) {
@@ -282,8 +357,11 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
     );
   }
 
-  const questionsLength = questions?.length ?? 0;
-  const participantsLength = participants?.length ?? 0;
+  // Safe data handling
+  const safeQuestions = Array.isArray(questions) ? questions : [];
+  const safeParticipants = Array.isArray(participants) ? participants : [];
+  const questionsLength = safeQuestions.length;
+  const participantsLength = safeParticipants.length;
   const roomName = room?.name ?? "Quiz Room";
   const roomCode = room?.code ?? "----";
 
@@ -304,13 +382,23 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
               </p>
               {socket && (
                 <p className="text-sm text-gray-400 mt-1">
-                  Socket: {socket.isConnected && socket.isConnected() ? "🟢 Connected" : "🔴 Disconnected"}
+                  Socket: {socket.isConnected() ? "🟢 Connected" : "🔴 Disconnected"}
                 </p>
               )}
             </div>
-            <div>
-              <NeonButton onClick={copyRoomCode} className="text-sm px-4 py-2" data-copy-button>
+            <div className="flex gap-2">
+              <NeonButton 
+                onClick={copyRoomCode} 
+                className="text-sm px-4 py-2" 
+                data-copy-button
+              >
                 Copy Code
+              </NeonButton>
+              <NeonButton 
+                onClick={() => router.push("/dashboard")} 
+                className="text-sm px-4 py-2 bg-gray-600"
+              >
+                Back
               </NeonButton>
             </div>
           </div>
@@ -324,6 +412,12 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
             className="bg-red-700 bg-opacity-30 border border-red-600 rounded-md p-4 mb-6 max-w-3xl mx-auto text-center"
           >
             <p>{error}</p>
+            <button 
+              onClick={() => setError("")} 
+              className="mt-2 text-red-200 hover:text-white text-sm underline"
+            >
+              Dismiss
+            </button>
           </motion.div>
         )}
 
@@ -355,6 +449,9 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
                       }}
                       className="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-white focus:outline-none focus:border-neonCyan"
                     />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Available: {questionsLength} questions
+                    </p>
                   </div>
                   <div>
                     <label className="block mb-1 text-gray-400 font-semibold">
@@ -373,7 +470,11 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
                     />
                   </div>
                 </div>
-                <NeonButton onClick={updateSettings} disabled={saveLoading} className="px-6 py-2">
+                <NeonButton 
+                  onClick={updateSettings} 
+                  disabled={saveLoading} 
+                  className="px-6 py-2"
+                >
                   {saveLoading ? "Saving..." : "Save Settings"}
                 </NeonButton>
               </motion.section>
@@ -397,9 +498,13 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
                   >
                     {startLoading ? "Starting..." : "Start Quiz"}
                   </NeonButton>
-                  {questionsLength === 0 && (
+                  {questionsLength === 0 ? (
                     <span className="text-yellow-400 font-semibold">
                       No questions added yet
+                    </span>
+                  ) : (
+                    <span className="text-gray-300">
+                      {questionsLength} question{questionsLength !== 1 ? 's' : ''} ready
                     </span>
                   )}
                 </div>
@@ -421,8 +526,8 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
               <p className="text-gray-500">No participants have joined yet.</p>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 max-h-64 overflow-y-auto">
-                {participants.map((participant) => {
-                  const { id, name, email } = participant || {};
+                {safeParticipants.map((participant) => {
+                  const { id = "", name = "", email = "" } = participant || {};
                   const displayName = name || email || "Anonymous";
                   const initial = displayName.charAt(0).toUpperCase();
                   
@@ -460,14 +565,26 @@ export default function RoomDashboard({ params }: { params: { roomId: string } }
                 <p className="mt-6 text-gray-500">No questions added yet.</p>
               ) : (
                 <ul className="mt-6 space-y-3 max-h-64 overflow-y-auto">
-                  {questions.map((question, idx) => {
-                    const { id, text, options = [], answer } = question || {};
+                  {safeQuestions.map((question, idx) => {
+                    const { id = "", text = "", options = [], answer = "" } = question || {};
+                    const safeOptions = Array.isArray(options) ? options : [];
                     
                     return (
                       <li key={id || idx} className="bg-gray-900 border border-gray-700 rounded-md p-3">
-                        <p className="mb-2 font-semibold">{`${idx + 1}. ${text || "Untitled Question"}`}</p>
+                        <div className="flex justify-between items-start mb-2">
+                          <p className="font-semibold flex-1">
+                            {`${idx + 1}. ${text || "Untitled Question"}`}
+                          </p>
+                          <button
+                            onClick={() => deleteQuestion(id, text)}
+                            className="text-red-400 hover:text-red-300 ml-2 text-sm"
+                            title="Delete question"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                         <div className="grid grid-cols-2 gap-2 text-sm">
-                          {options.map((option, i) => (
+                          {safeOptions.map((option, i) => (
                             <span
                               key={i}
                               className={`px-2 py-1 rounded ${

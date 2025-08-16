@@ -15,6 +15,7 @@ interface Room {
   questionCount: number;
   timePerQuestion: number;
   createdAt: string;
+  isActive: boolean;
 }
 
 export default function Dashboard() {
@@ -28,7 +29,7 @@ export default function Dashboard() {
   const [joinCode, setJoinCode] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
 
-  // Load user's rooms
+  // Load user's rooms with proper error handling
   const loadRooms = useCallback(async () => {
     if (!isLoaded || !isSignedIn) return;
 
@@ -42,13 +43,15 @@ export default function Dashboard() {
       }
       
       const data = await res.json();
+      
+      // Ensure rooms is always an array
       const validRooms = Array.isArray(data?.rooms) ? data.rooms : [];
       setRooms(validRooms);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to load rooms";
       console.error("Load rooms error:", err);
       setError(errorMessage);
-      setRooms([]); // Ensure rooms is always an array
+      setRooms([]); // Always ensure it's an array
     } finally {
       setLoading(false);
     }
@@ -63,10 +66,18 @@ export default function Dashboard() {
     loadRooms();
   }, [isLoaded, isSignedIn, loadRooms, router]);
 
-  // Create new room
+  // Create new room with proper validation
   const createRoom = useCallback(async () => {
     const roomName = prompt("Enter room name:")?.trim();
-    if (!roomName) return;
+    if (!roomName || roomName.length === 0) {
+      alert("Please enter a valid room name");
+      return;
+    }
+
+    if (roomName.length > 100) {
+      alert("Room name must be 100 characters or less");
+      return;
+    }
 
     setCreateLoading(true);
     setError("");
@@ -97,13 +108,18 @@ export default function Dashboard() {
     }
   }, [router]);
 
-  // Join existing room
+  // Join existing room with proper validation
   const joinRoom = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const code = joinCode?.trim();
-    if (!code) {
+    const code = joinCode?.trim().toUpperCase();
+    if (!code || code.length === 0) {
       setError("Please enter a room code");
+      return;
+    }
+
+    if (code.length !== 6) {
+      setError("Room code must be exactly 6 characters");
       return;
     }
 
@@ -111,23 +127,35 @@ export default function Dashboard() {
     setError("");
 
     try {
-      const res = await fetch("/api/room/join", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "Failed to join room" }));
+      // First, find room by code
+      const roomRes = await fetch(`/api/room/by-code?code=${code}`);
+      
+      if (!roomRes.ok) {
+        const errorData = await roomRes.json().catch(() => ({ error: "Room not found" }));
         throw new Error(errorData.error || "Room not found");
       }
 
-      const data = await res.json();
-      if (data?.room?.id) {
-        router.push(`/dashboard/${data.room.id}`);
-      } else {
-        throw new Error("Invalid response from server");
+      const roomData = await roomRes.json();
+      
+      if (!roomData?.room?.id) {
+        throw new Error("Invalid room data");
       }
+
+      // Then join the session
+      const joinRes = await fetch("/api/session/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: roomData.room.id }),
+      });
+
+      if (!joinRes.ok) {
+        const errorData = await joinRes.json().catch(() => ({ error: "Failed to join room" }));
+        throw new Error(errorData.error || "Failed to join room");
+      }
+
+      // Navigate to quiz page
+      router.push(`/quiz/${roomData.room.id}`);
+      
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to join room";
       setError(errorMessage);
@@ -136,9 +164,11 @@ export default function Dashboard() {
     }
   }, [joinCode, router]);
 
-  // Delete room
+  // Delete room with confirmation
   const deleteRoom = useCallback(async (roomId: string, roomName: string) => {
-    const confirmed = window.confirm(`Are you sure you want to delete "${roomName}"? This action cannot be undone.`);
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${roomName}"? This action cannot be undone.`
+    );
     if (!confirmed) return;
 
     try {
@@ -151,10 +181,42 @@ export default function Dashboard() {
       }
 
       // Remove from local state
-      setRooms(prev => (prev || []).filter(room => room.id !== roomId));
+      setRooms(prev => (Array.isArray(prev) ? prev : []).filter(room => room?.id !== roomId));
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to delete room";
       setError(errorMessage);
+    }
+  }, []);
+
+  // Copy room code to clipboard
+  const copyRoomCode = useCallback(async (code: string) => {
+    if (!code) return;
+
+    try {
+      await navigator.clipboard.writeText(code);
+      
+      // Show feedback
+      const button = document.querySelector(`[data-copy-code="${code}"]`) as HTMLButtonElement;
+      if (button) {
+        const original = button.textContent;
+        button.textContent = "Copied!";
+        button.classList.add("bg-green-600");
+        
+        setTimeout(() => {
+          if (button) {
+            button.textContent = original;
+            button.classList.remove("bg-green-600");
+          }
+        }, 2000);
+      }
+    } catch (error) {
+      // Fallback for older browsers
+      const textArea = document.createElement("textarea");
+      textArea.value = code;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
     }
   }, []);
 
@@ -167,7 +229,9 @@ export default function Dashboard() {
     return null;
   }
 
-  const roomsLength = rooms?.length ?? 0;
+  // Ensure rooms is always an array
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+  const roomsLength = safeRooms.length;
   const userName = user?.firstName || user?.fullName || "User";
 
   return (
@@ -191,6 +255,12 @@ export default function Dashboard() {
             className="bg-red-700 bg-opacity-30 border border-red-600 rounded-lg p-4 mb-6 max-w-2xl mx-auto text-center"
           >
             <p className="text-red-300">{error}</p>
+            <button 
+              onClick={() => setError("")} 
+              className="mt-2 text-red-200 hover:text-white text-sm underline"
+            >
+              Dismiss
+            </button>
           </motion.div>
         )}
 
@@ -206,7 +276,14 @@ export default function Dashboard() {
             disabled={createLoading}
             className="flex-1 bg-green-600 hover:bg-green-700 py-4 text-lg font-semibold"
           >
-            {createLoading ? "Creating..." : "🎯 Create New Quiz"}
+            {createLoading ? (
+              <div className="flex items-center justify-center gap-2">
+                <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                Creating...
+              </div>
+            ) : (
+              "🎯 Create New Quiz"
+            )}
           </NeonButton>
 
           <form onSubmit={joinRoom} className="flex-1 flex gap-2">
@@ -215,16 +292,22 @@ export default function Dashboard() {
               placeholder="Enter room code..."
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-              className="flex-1 bg-gray-800 text-white rounded-lg px-4 py-4 border border-gray-600 focus:border-neonCyan focus:outline-none text-center font-mono"
+              className="flex-1 bg-gray-800 text-white rounded-lg px-4 py-4 border border-gray-600 focus:border-neonCyan focus:outline-none text-center font-mono tracking-wider"
               disabled={joinLoading}
               maxLength={6}
+              pattern="[A-Z0-9]{6}"
+              title="Room code should be 6 characters (letters and numbers)"
             />
             <NeonButton
               type="submit"
               disabled={joinLoading || !joinCode.trim()}
               className="bg-blue-600 hover:bg-blue-700 px-6 py-4"
             >
-              {joinLoading ? "..." : "Join"}
+              {joinLoading ? (
+                <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+              ) : (
+                "Join"
+              )}
             </NeonButton>
           </form>
         </motion.div>
@@ -236,7 +319,9 @@ export default function Dashboard() {
           transition={{ delay: 0.2 }}
           className="max-w-6xl mx-auto"
         >
-          <h2 className="text-3xl font-bold text-center mb-8">Your Quiz Rooms ({roomsLength})</h2>
+          <h2 className="text-3xl font-bold text-center mb-8">
+            Your Quiz Rooms ({roomsLength})
+          </h2>
 
           {roomsLength === 0 ? (
             <div className="text-center py-12 bg-gray-800 rounded-lg border border-gray-700">
@@ -246,9 +331,21 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {rooms.map((room) => {
-                const { id, name, code, questionCount, timePerQuestion, createdAt } = room || {};
-                const formattedDate = createdAt ? new Date(createdAt).toLocaleDateString() : "Unknown";
+              {safeRooms.map((room) => {
+                // Safely handle room data with fallbacks
+                const {
+                  id = "",
+                  name = "Unnamed Room",
+                  code = "----",
+                  questionCount = 0,
+                  timePerQuestion = 30,
+                  createdAt = "",
+                  isActive = true
+                } = room || {};
+                
+                const formattedDate = createdAt 
+                  ? new Date(createdAt).toLocaleDateString() 
+                  : "Unknown";
                 
                 return (
                   <motion.div
@@ -256,34 +353,48 @@ export default function Dashboard() {
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     whileHover={{ scale: 1.02 }}
-                    className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg border border-gray-600 p-6 hover:border-neonPink transition-all duration-300"
+                    className={`
+                      bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg border p-6 hover:border-neonPink transition-all duration-300
+                      ${isActive ? 'border-gray-600' : 'border-red-600 opacity-75'}
+                    `}
                   >
                     <div className="flex justify-between items-start mb-4">
-                      <h3 className="text-xl font-bold text-neonCyan truncate">
-                        {name || "Unnamed Room"}
+                      <h3 className="text-xl font-bold text-neonCyan truncate pr-2">
+                        {name}
                       </h3>
-                      <button
-                        onClick={() => deleteRoom(id, name || "Unnamed Room")}
-                        className="text-red-400 hover:text-red-300 text-sm opacity-70 hover:opacity-100 transition-opacity"
-                        aria-label="Delete room"
-                      >
-                        🗑️
-                      </button>
+                      <div className="flex gap-2">
+                        {!isActive && (
+                          <span className="text-red-400 text-xs bg-red-900 px-2 py-1 rounded">
+                            Inactive
+                          </span>
+                        )}
+                        <button
+                          onClick={() => deleteRoom(id, name)}
+                          className="text-red-400 hover:text-red-300 text-sm opacity-70 hover:opacity-100 transition-opacity"
+                          aria-label="Delete room"
+                          title="Delete room"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
 
                     <div className="space-y-2 mb-6 text-sm text-gray-300">
-                      <p>
-                        <span className="font-semibold">Code:</span>{" "}
-                        <span className="font-mono text-neonPink">{code || "----"}</span>
+                      <p className="flex justify-between">
+                        <span className="font-semibold">Code:</span>
+                        <span className="font-mono text-neonPink">{code}</span>
                       </p>
-                      <p>
-                        <span className="font-semibold">Questions:</span> {questionCount || 0}
+                      <p className="flex justify-between">
+                        <span className="font-semibold">Questions:</span>
+                        <span>{questionCount}</span>
                       </p>
-                      <p>
-                        <span className="font-semibold">Time per Q:</span> {timePerQuestion || 30}s
+                      <p className="flex justify-between">
+                        <span className="font-semibold">Time per Q:</span>
+                        <span>{timePerQuestion}s</span>
                       </p>
-                      <p>
-                        <span className="font-semibold">Created:</span> {formattedDate}
+                      <p className="flex justify-between">
+                        <span className="font-semibold">Created:</span>
+                        <span>{formattedDate}</span>
                       </p>
                     </div>
 
@@ -291,28 +402,20 @@ export default function Dashboard() {
                       <NeonButton
                         onClick={() => router.push(`/dashboard/${id}`)}
                         className="flex-1 bg-purple-600 hover:bg-purple-700 py-2 text-sm"
+                        disabled={!isActive}
                       >
-                        Manage
+                        {isActive ? "Manage" : "View"}
                       </NeonButton>
-                      <NeonButton
-                        onClick={() => {
-                          if (code) {
-                            navigator.clipboard.writeText(code).catch(() => {
-                              // Fallback
-                              const textArea = document.createElement("textarea");
-                              textArea.value = code;
-                              document.body.appendChild(textArea);
-                              textArea.select();
-                              document.execCommand('copy');
-                              document.body.removeChild(textArea);
-                            });
-                          }
-                        }}
-                        className="bg-gray-700 hover:bg-gray-600 px-3 py-2 text-sm"
-                        disabled={!code}
+                      
+                      <button
+                        onClick={() => copyRoomCode(code)}
+                        data-copy-code={code}
+                        className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 text-sm rounded-lg transition-colors"
+                        disabled={!code || code === "----"}
+                        title="Copy room code"
                       >
                         Copy Code
-                      </NeonButton>
+                      </button>
                     </div>
                   </motion.div>
                 );
@@ -329,6 +432,10 @@ export default function Dashboard() {
           className="text-center mt-16 text-gray-500"
         >
           <p>Ready to create engaging quizzes? Start by creating a new room!</p>
+          <div className="mt-4 text-xs">
+            <span className="text-green-400">🟢</span> Active rooms can host quizzes • 
+            <span className="text-red-400 ml-2">🔴</span> Inactive rooms are archived
+          </div>
         </motion.footer>
       </div>
     </div>
