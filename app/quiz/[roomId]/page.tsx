@@ -133,7 +133,8 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
         // FIXED: Safe handling of leaderboard and userStats
         let finalLeaderboard: LeaderboardEntry[] = [];
         if (payload?.leaderboard && Array.isArray(payload.leaderboard)) {
-          finalLeaderboard = payload.leaderboard.filter(entry => entry && typeof entry === 'object');
+          finalLeaderboard = payload.leaderboard.filter((entry: LeaderboardEntry) => entry && typeof entry === 'object');
+
         }
         setLeaderboard(finalLeaderboard);
 
@@ -190,7 +191,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
         let sessionParticipants: any[] = [];
         if (data.session.participants) {
           if (Array.isArray(data.session.participants)) {
-            sessionParticipants = data.session.participants.filter(p => p && typeof p === 'object');
+            sessionParticipants = data.session.participants.filter((p: any) => p && typeof p === 'object');
           }
         }
         setParticipants(sessionParticipants);

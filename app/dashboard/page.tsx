@@ -36,26 +36,33 @@ export default function Dashboard() {
     try {
       setError("");
       const res = await fetch("/api/room/list");
-      
+
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "Failed to load rooms" }));
+        const errorData = await res
+          .json()
+          .catch(() => ({ error: "Failed to load rooms" }));
         throw new Error(errorData.error || "Failed to load rooms");
       }
-      
+
       const data = await res.json();
-      
+
       // FIXED: Ensure rooms is always an array with proper null/undefined checks
       let validRooms: Room[] = [];
-      if (data && typeof data === 'object') {
+      if (data && typeof data === "object") {
         if (Array.isArray(data.rooms)) {
-          validRooms = data.rooms.filter(room => room && typeof room === 'object');
+          validRooms = data.rooms.filter(
+            (room: Room) => room && typeof room === "object"
+          );
         } else if (Array.isArray(data)) {
-          validRooms = data.filter(room => room && typeof room === 'object');
+          validRooms = data.filter(
+            (room: Room) => room && typeof room === "object"
+          );
         }
       }
       setRooms(validRooms);
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to load rooms";
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to load rooms";
       console.error("Load rooms error:", err);
       setError(errorMessage);
       setRooms([]); // Always ensure it's an empty array on error
@@ -97,7 +104,9 @@ export default function Dashboard() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "Failed to create room" }));
+        const errorData = await res
+          .json()
+          .catch(() => ({ error: "Failed to create room" }));
         throw new Error(errorData.error || "Failed to create room");
       }
 
@@ -108,7 +117,8 @@ export default function Dashboard() {
         throw new Error("Invalid response from server");
       }
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to create room";
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to create room";
       setError(errorMessage);
     } finally {
       setCreateLoading(false);
@@ -116,60 +126,67 @@ export default function Dashboard() {
   }, [router]);
 
   // Join existing room with proper validation
-  const joinRoom = useCallback(async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    const code = joinCode?.trim().toUpperCase();
-    if (!code || code.length === 0) {
-      setError("Please enter a room code");
-      return;
-    }
+  const joinRoom = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
 
-    if (code.length !== 6) {
-      setError("Room code must be exactly 6 characters");
-      return;
-    }
-
-    setJoinLoading(true);
-    setError("");
-
-    try {
-      // First, find room by code
-      const roomRes = await fetch(`/api/room/by-code?code=${code}`);
-      
-      if (!roomRes.ok) {
-        const errorData = await roomRes.json().catch(() => ({ error: "Room not found" }));
-        throw new Error(errorData.error || "Room not found");
+      const code = joinCode?.trim().toUpperCase();
+      if (!code || code.length === 0) {
+        setError("Please enter a room code");
+        return;
       }
 
-      const roomData = await roomRes.json();
-      
-      if (!roomData?.room?.id) {
-        throw new Error("Invalid room data");
+      if (code.length !== 6) {
+        setError("Room code must be exactly 6 characters");
+        return;
       }
 
-      // Then join the session
-      const joinRes = await fetch("/api/session/join", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: roomData.room.id }),
-      });
+      setJoinLoading(true);
+      setError("");
 
-      if (!joinRes.ok) {
-        const errorData = await joinRes.json().catch(() => ({ error: "Failed to join room" }));
-        throw new Error(errorData.error || "Failed to join room");
+      try {
+        // First, find room by code
+        const roomRes = await fetch(`/api/room/by-code?code=${code}`);
+
+        if (!roomRes.ok) {
+          const errorData = await roomRes
+            .json()
+            .catch(() => ({ error: "Room not found" }));
+          throw new Error(errorData.error || "Room not found");
+        }
+
+        const roomData = await roomRes.json();
+
+        if (!roomData?.room?.id) {
+          throw new Error("Invalid room data");
+        }
+
+        // Then join the session
+        const joinRes = await fetch("/api/session/join", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomId: roomData.room.id }),
+        });
+
+        if (!joinRes.ok) {
+          const errorData = await joinRes
+            .json()
+            .catch(() => ({ error: "Failed to join room" }));
+          throw new Error(errorData.error || "Failed to join room");
+        }
+
+        // Navigate to quiz page
+        router.push(`/quiz/${roomData.room.id}`);
+      } catch (err: unknown) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Failed to join room";
+        setError(errorMessage);
+      } finally {
+        setJoinLoading(false);
       }
-
-      // Navigate to quiz page
-      router.push(`/quiz/${roomData.room.id}`);
-      
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to join room";
-      setError(errorMessage);
-    } finally {
-      setJoinLoading(false);
-    }
-  }, [joinCode, router]);
+    },
+    [joinCode, router]
+  );
 
   // Delete room with confirmation
   const deleteRoom = useCallback(async (roomId: string, roomName: string) => {
@@ -181,19 +198,22 @@ export default function Dashboard() {
     try {
       setError("");
       const res = await fetch(`/api/room/${roomId}`, { method: "DELETE" });
-      
+
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({ error: "Failed to delete room" }));
+        const errorData = await res
+          .json()
+          .catch(() => ({ error: "Failed to delete room" }));
         throw new Error(errorData.error || "Failed to delete room");
       }
 
       // Remove from local state safely
-      setRooms(prev => {
+      setRooms((prev) => {
         if (!Array.isArray(prev)) return [];
-        return prev.filter(room => room?.id !== roomId);
+        return prev.filter((room) => room?.id !== roomId);
       });
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to delete room";
+      const errorMessage =
+        err instanceof Error ? err.message : "Failed to delete room";
       setError(errorMessage);
     }
   }, []);
@@ -204,14 +224,16 @@ export default function Dashboard() {
 
     try {
       await navigator.clipboard.writeText(code);
-      
+
       // Show feedback
-      const button = document.querySelector(`[data-copy-code="${code}"]`) as HTMLButtonElement;
+      const button = document.querySelector(
+        `[data-copy-code="${code}"]`
+      ) as HTMLButtonElement;
       if (button) {
         const original = button.textContent;
         button.textContent = "Copied!";
         button.classList.add("bg-green-600");
-        
+
         setTimeout(() => {
           if (button) {
             button.textContent = original;
@@ -225,7 +247,7 @@ export default function Dashboard() {
       textArea.value = code;
       document.body.appendChild(textArea);
       textArea.select();
-      document.execCommand('copy');
+      document.execCommand("copy");
       document.body.removeChild(textArea);
     }
   }, []);
@@ -240,7 +262,9 @@ export default function Dashboard() {
   }
 
   // FIXED: Always ensure rooms is a safe array with proper checks
-  const safeRooms = Array.isArray(rooms) ? rooms.filter(room => room && typeof room === 'object') : [];
+  const safeRooms = Array.isArray(rooms)
+    ? rooms.filter((room) => room && typeof room === "object")
+    : [];
   const roomsLength = safeRooms.length;
   const userName = user?.firstName || user?.fullName || "User";
 
@@ -253,7 +277,9 @@ export default function Dashboard() {
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-12"
         >
-          <h1 className="text-5xl font-bold neon-text mb-4">QuizMaster Dashboard</h1>
+          <h1 className="text-5xl font-bold neon-text mb-4">
+            QuizMaster Dashboard
+          </h1>
           <p className="text-xl text-gray-300">Welcome back, {userName}!</p>
         </motion.header>
 
@@ -265,8 +291,8 @@ export default function Dashboard() {
             className="bg-red-700 bg-opacity-30 border border-red-600 rounded-lg p-4 mb-6 max-w-2xl mx-auto text-center"
           >
             <p className="text-red-300">{error}</p>
-            <button 
-              onClick={() => setError("")} 
+            <button
+              onClick={() => setError("")}
               className="mt-2 text-red-200 hover:text-white text-sm underline"
             >
               Dismiss
@@ -337,14 +363,16 @@ export default function Dashboard() {
             <div className="text-center py-12 bg-gray-800 rounded-lg border border-gray-700">
               <div className="text-6xl mb-4">🎮</div>
               <p className="text-xl text-gray-400 mb-4">No quiz rooms yet</p>
-              <p className="text-gray-500">Create your first room to get started!</p>
+              <p className="text-gray-500">
+                Create your first room to get started!
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {safeRooms.map((room) => {
                 // FIXED: Safely handle room data with proper null checks
-                if (!room || typeof room !== 'object') return null;
-                
+                if (!room || typeof room !== "object") return null;
+
                 const {
                   id = "",
                   name = "Unnamed Room",
@@ -352,15 +380,15 @@ export default function Dashboard() {
                   questionCount = 0,
                   timePerQuestion = 30,
                   createdAt = "",
-                  isActive = true
+                  isActive = true,
                 } = room;
-                
+
                 if (!id) return null; // Skip rooms without valid IDs
-                
-                const formattedDate = createdAt 
-                  ? new Date(createdAt).toLocaleDateString() 
+
+                const formattedDate = createdAt
+                  ? new Date(createdAt).toLocaleDateString()
                   : "Unknown";
-                
+
                 return (
                   <motion.div
                     key={id}
@@ -369,7 +397,11 @@ export default function Dashboard() {
                     whileHover={{ scale: 1.02 }}
                     className={`
                       bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg border p-6 hover:border-neonPink transition-all duration-300
-                      ${isActive ? 'border-gray-600' : 'border-red-600 opacity-75'}
+                      ${
+                        isActive
+                          ? "border-gray-600"
+                          : "border-red-600 opacity-75"
+                      }
                     `}
                   >
                     <div className="flex justify-between items-start mb-4">
@@ -420,7 +452,7 @@ export default function Dashboard() {
                       >
                         {isActive ? "Manage" : "View"}
                       </NeonButton>
-                      
+
                       <button
                         onClick={() => copyRoomCode(code)}
                         data-copy-code={code}
@@ -447,8 +479,9 @@ export default function Dashboard() {
         >
           <p>Ready to create engaging quizzes? Start by creating a new room!</p>
           <div className="mt-4 text-xs">
-            <span className="text-green-400">🟢</span> Active rooms can host quizzes • 
-            <span className="text-red-400 ml-2">🔴</span> Inactive rooms are archived
+            <span className="text-green-400">🟢</span> Active rooms can host
+            quizzes •<span className="text-red-400 ml-2">🔴</span> Inactive
+            rooms are archived
           </div>
         </motion.footer>
       </div>
