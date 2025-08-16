@@ -41,115 +41,126 @@ interface LeaderboardEntry {
   rank: number;
 }
 
+interface QuizStartData {
+  sessionId?: string;
+  question: Question;
+  timePerQuestion: number;
+}
+
+interface UseSocketEvents {
+  onParticipantsUpdate?: (participants: any[]) => void;
+  onQuizStart?: (data: any) => void;
+  onQuizState?: (data: any) => void;
+  onQuestionChange?: (data: any) => void;
+  onAnswerSubmitted?: (data: any) => void;
+  onQuizEnd?: (data: any) => void;
+  onLeaderboardUpdate?: (data: any) => void;
+  onTimeUp?: () => void;
+  onError?: (msg: string) => void;
+}
+
 export default function QuizPage({ params }: { params: { roomId: string } }) {
   const { roomId } = params;
   const { isSignedIn, user } = useUser();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const sessionId = searchParams ? searchParams.get("sessionId") : null;
+  const sessionId = searchParams?.get("sessionId") ?? null;
 
-  // State management
   const [session, setSession] = useState<QuizSession | null>(null);
   const [participants, setParticipants] = useState<any[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
-  const [userScore, setUserScore] = useState(0);
-  const [quizStarted, setQuizStarted] = useState(false);
-  const [quizEnded, setQuizEnded] = useState(false);
+  const [userScore, setUserScore] = useState<number>(0);
+  const [quizStarted, setQuizStarted] = useState<boolean>(false);
+  const [quizEnded, setQuizEnded] = useState<boolean>(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [timeLeft, setTimeLeft] = useState(0);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string>("");
+  const [timeLeft, setTimeLeft] = useState<number>(0);
   const [questionStartTime, setQuestionStartTime] = useState<number | null>(null);
-  const [hasAnswered, setHasAnswered] = useState(false);
-  const [showCorrectAnswer, setShowCorrectAnswer] = useState(false);
+  const [hasAnswered, setHasAnswered] = useState<boolean>(false);
+  const [showCorrectAnswer, setShowCorrectAnswer] = useState<boolean>(false);
 
   const isHost = session?.room?.createdBy === user?.id;
 
-  // Socket connection with comprehensive event handling
-  const socket = useSocket(roomId, user?.id, user?.firstName || user?.emailAddresses[0]?.emailAddress, {
-    onParticipantsUpdate: (updated) => {
-      console.log("👥 Participants updated:", updated);
-      setParticipants(updated);
-    },
-    
-    onQuizStart: (data) => {
-      console.log("🎯 Quiz started:", data);
-      setQuizStarted(true);
-      setQuizEnded(false);
-      setCurrentQuestion(data.question);
-      setTimeLeft(data.timePerQuestion);
-      setQuestionStartTime(Date.now());
-      setHasAnswered(false);
-      setShowCorrectAnswer(false);
-    },
+  const socket = useSocket(
+    roomId,
+    user?.id,
+    user?.firstName ?? user?.emailAddresses?.[0]?.emailAddress ?? undefined,
+    {
+      onParticipantsUpdate: (updated: any[]) => {
+        setParticipants(Array.isArray(updated) ? updated : []);
+      },
 
-    onQuizState: (data) => {
-      console.log("📊 Received quiz state:", data);
-      if (data.isActive && data.question) {
+      onQuizStart: (data: { sessionId?: string }) => {
+        const quizData = data as QuizStartData;
         setQuizStarted(true);
-        setCurrentQuestion(data.question);
-        setTimeLeft(data.timePerQuestion);
+        setQuizEnded(false);
+        setCurrentQuestion(quizData.question);
+        setTimeLeft(quizData.timePerQuestion);
         setQuestionStartTime(Date.now());
         setHasAnswered(false);
         setShowCorrectAnswer(false);
-      }
-    },
-    
-    onQuestionChange: (data) => {
-      console.log("❓ Question changed:", data);
-      setCurrentQuestion(data.question);
-      setTimeLeft(data.timePerQuestion);
-      setQuestionStartTime(Date.now());
-      setHasAnswered(false);
-      setShowCorrectAnswer(false);
-    },
-    
-    onTimeUp: (data) => {
-      console.log("⏰ Time up:", data);
-      setTimeLeft(0);
-      setShowCorrectAnswer(true);
-    },
-    
-    onQuizEnd: (payload) => {
-      console.log("🏁 Quiz ended:", payload);
-      setQuizEnded(true);
-      setQuizStarted(false);
-      setLeaderboard(payload.leaderboard || []);
-    },
+      },
 
-    onAnswerSubmitted: (data) => {
-      console.log("✅ Answer result:", data);
-      setUserScore(data.totalScore);
-      setHasAnswered(true);
-    },
+      onQuizState: (data: { isActive?: boolean; question?: Question; timePerQuestion?: number }) => {
+        if (data?.isActive && data.question) {
+          setQuizStarted(true);
+          setCurrentQuestion(data.question);
+          setTimeLeft(data.timePerQuestion ?? 0);
+          setQuestionStartTime(Date.now());
+          setHasAnswered(false);
+          setShowCorrectAnswer(false);
+        }
+      },
 
-    onLeaderboardUpdate: (leaderboardData) => {
-      console.log("🏆 Leaderboard updated:", leaderboardData);
-      setLeaderboard(leaderboardData);
-    }
-  });
+      onQuestionChange: (data: { question?: Question; timePerQuestion?: number }) => {
+        if (data?.question) {
+          setCurrentQuestion(data.question);
+          setTimeLeft(data.timePerQuestion ?? 0);
+          setQuestionStartTime(Date.now());
+          setHasAnswered(false);
+          setShowCorrectAnswer(false);
+        }
+      },
 
-  // Load initial quiz data
+      onTimeUp: () => {
+        setTimeLeft(0);
+        setShowCorrectAnswer(true);
+      },
+
+      onQuizEnd: (payload: { leaderboard?: LeaderboardEntry[] }) => {
+        setQuizEnded(true);
+        setQuizStarted(false);
+        setLeaderboard(Array.isArray(payload.leaderboard) ? payload.leaderboard : []);
+      },
+
+      onAnswerSubmitted: (data: { totalScore?: number }) => {
+        setUserScore(data?.totalScore ?? 0);
+        setHasAnswered(true);
+      },
+
+      onLeaderboardUpdate: (leaderboardData: LeaderboardEntry[]) => {
+        setLeaderboard(Array.isArray(leaderboardData) ? leaderboardData : []);
+      },
+    } as UseSocketEvents
+  );
+
   const loadQuizData = useCallback(async () => {
+    setLoading(true);
+    setError("");
     try {
       let url = `/api/session/active?roomId=${roomId}`;
       if (sessionId) url += `&sessionId=${sessionId}`;
-      
+
       const res = await fetch(url);
-      if (!res.ok) {
-        throw new Error("Quiz session not found");
-      }
-      
+      if (!res.ok) throw new Error("Quiz session not found");
       const data = await res.json();
-      setSession(data.session);
-      setParticipants(data.session.participants || []);
-      
-      // Check if quiz is already active
-      if (data.session.isActive) {
-        setQuizStarted(true);
-      }
-    } catch (err: any) {
-      setError(err.message);
+
+      setSession(data.session ?? null);
+      setParticipants(Array.isArray(data.session?.participants) ? data.session.participants : []);
+      if (data.session?.isActive) setQuizStarted(true);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Unknown error loading quiz");
     } finally {
       setLoading(false);
     }
@@ -163,31 +174,22 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
     loadQuizData();
   }, [isSignedIn, loadQuizData, router]);
 
-  // Handle answer submission
-  const handleAnswerSubmit = async (selectedOption: string, currentTimeLeft: number) => {
-    if (!session || !currentQuestion || quizEnded || isHost || hasAnswered) return;
-    
-    const questionId = currentQuestion.id;
-    
-    try {
-      // Submit via socket for real-time response
-      socket?.submitAnswer({
+  const handleAnswerSubmit = useCallback(
+    (selectedOption: string, currentTimeLeft: number) => {
+      if (!session || !currentQuestion || quizEnded || isHost || hasAnswered || !socket) return;
+      socket.submitAnswer({
         roomId,
-        questionId,
+        questionId: currentQuestion.id,
         selectedOption,
         userId: user?.id,
         timeLeft: currentTimeLeft,
       });
-      
-    } catch (err) {
-      console.error("Error submitting answer:", err);
-    }
-  };
+    },
+    [session, currentQuestion, quizEnded, isHost, hasAnswered, socket, roomId, user?.id]
+  );
 
-  // Host controls
-  const handleStartQuiz = async () => {
+  const handleStartQuiz = useCallback(async () => {
     if (!session) return;
-    
     try {
       const res = await fetch("/api/room/start", {
         method: "POST",
@@ -197,41 +199,33 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
           timePerQuestion: session.room.timePerQuestion,
         }),
       });
-      
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({ error: "Failed to start quiz" }));
         throw new Error(errorData.error || "Failed to start quiz");
       }
-      
-      console.log("✅ Quiz start request sent");
     } catch (error) {
-      console.error("❌ Error starting quiz:", error);
-      setError((error as Error).message);
+      setError(error instanceof Error ? error.message : "Failed to start quiz");
     }
-  };
+  }, [session, roomId]);
 
-  const handleNextQuestion = () => {
+  const handleNextQuestion = useCallback(() => {
     if (!socket) return;
-    socket.nextQuestion({ roomId });
-  };
+    socket.startQuiz({ roomId });
+  }, [socket, roomId]);
 
-  const handleEndQuiz = () => {
+  const handleEndQuiz = useCallback(() => {
     if (!socket) return;
     socket.endQuiz({ roomId });
-  };
+  }, [socket, roomId]);
 
-  // Timer countdown effect
   useEffect(() => {
     if (!quizStarted || quizEnded || timeLeft <= 0 || !questionStartTime) return;
 
     const timer = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - questionStartTime) / 1000);
-      const remaining = Math.max(0, (session?.room.timePerQuestion || 30) - elapsed);
+      const elapsed = Math.floor((Date.now() - (questionStartTime ?? 0)) / 1000);
+      const remaining = Math.max(0, (session?.room.timePerQuestion ?? 30) - elapsed);
       setTimeLeft(remaining);
-      
-      if (remaining <= 0) {
-        clearInterval(timer);
-      }
+      if (remaining <= 0) clearInterval(timer);
     }, 1000);
 
     return () => clearInterval(timer);
@@ -246,9 +240,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
           <div className="text-6xl mb-6">⚠️</div>
           <h2 className="text-2xl font-bold text-yellow-400 mb-4">Quiz Not Available</h2>
           <p className="text-gray-400 mb-6">{error}</p>
-          <NeonButton onClick={() => router.push("/dashboard")}>
-            Back to Dashboard
-          </NeonButton>
+          <NeonButton onClick={() => router.push("/dashboard")}>Back to Dashboard</NeonButton>
         </div>
       </div>
     );
@@ -265,7 +257,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white">
       <div className="container mx-auto px-6 py-8">
-        {/* Header */}
         <motion.header
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -273,14 +264,14 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
         >
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <h1 className="text-3xl font-bold neon-text mb-2">
-                {session.room.name}
-              </h1>
+              <h1 className="text-3xl font-bold neon-text mb-2">{session.room.name}</h1>
               <div className="flex items-center gap-4 text-sm text-gray-300">
                 <span>Room: {session.room.code}</span>
                 <span>Participants: {participants.length}</span>
                 {quizStarted && currentQuestion && (
-                  <span>Question {currentQuestion.index + 1} of {currentQuestion.total}</span>
+                  <span>
+                    Question {currentQuestion.index + 1} of {currentQuestion.total}
+                  </span>
                 )}
                 {quizEnded && <span className="text-yellow-400">Quiz Completed</span>}
               </div>
@@ -293,9 +284,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
             )}
           </div>
         </motion.header>
-
         <div className="max-w-4xl mx-auto">
-          {/* Waiting for Quiz to Start */}
           {!quizStarted && !quizEnded && (
             <motion.div
               initial={{ opacity: 0, scale: 0.9 }}
@@ -309,16 +298,11 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                     {participants.length} participant(s) joined. Click start when ready.
                   </p>
                   <div className="space-y-4">
-                    <NeonButton
-                      onClick={handleStartQuiz}
-                      className="px-8 py-3 bg-green-500 text-black"
-                    >
+                    <NeonButton onClick={handleStartQuiz} className="px-8 py-3 bg-green-500 text-black">
                       Start Quiz
                     </NeonButton>
                     {participants.length === 0 && (
-                      <p className="text-yellow-400 text-sm">
-                        💡 Share room code {session.room.code} to invite participants
-                      </p>
+                      <p className="text-yellow-400 text-sm">💡 Share room code {session.room.code} to invite participants</p>
                     )}
                   </div>
                 </div>
@@ -326,15 +310,11 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                 <div>
                   <div className="animate-pulse text-6xl mb-6">⏳</div>
                   <h2 className="text-3xl font-bold text-neonCyan mb-4">Get Ready!</h2>
-                  <p className="text-gray-400">
-                    Waiting for the host to start the quiz...
-                  </p>
+                  <p className="text-gray-400">Waiting for the host to start the quiz...</p>
                 </div>
               )}
             </motion.div>
           )}
-
-          {/* Active Quiz - Question Display */}
           {quizStarted && !quizEnded && currentQuestion && (
             <AnimatePresence mode="wait">
               <motion.div
@@ -345,16 +325,9 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                 transition={{ duration: 0.3 }}
                 className="space-y-6"
               >
-                {/* Timer */}
                 <div className="text-center">
-                  <QuizTimer
-                    key={`${currentQuestion.id}-timer`}
-                    seconds={timeLeft}
-                    onTimeUp={() => {}}
-                  />
+                  <QuizTimer key={`${currentQuestion.id}-timer`} seconds={timeLeft} onTimeUp={() => {}} />
                 </div>
-
-                {/* Question for Participants */}
                 {!isHost && (
                   <QuizQuestion
                     question={currentQuestion}
@@ -364,8 +337,6 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                     // showCorrectAnswer={showCorrectAnswer}
                   />
                 )}
-
-                {/* Host Controls */}
                 {isHost && (
                   <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
                     <div className="text-center mb-6">
@@ -374,17 +345,13 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                         <p className="text-lg font-medium mb-4">{currentQuestion.text}</p>
                         <div className="grid grid-cols-2 gap-2">
                           {currentQuestion.options.map((option, index) => (
-                            <div
-                              key={index}
-                              className="bg-gray-700 rounded px-3 py-2 text-sm"
-                            >
+                            <div key={index} className="bg-gray-700 rounded px-3 py-2 text-sm">
                               {String.fromCharCode(65 + index)}) {option}
                             </div>
                           ))}
                         </div>
                       </div>
                     </div>
-                    
                     <div className="flex justify-center gap-4">
                       <button
                         onClick={handleNextQuestion}
@@ -404,30 +371,13 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
               </motion.div>
             </AnimatePresence>
           )}
-
-          {/* Real-time Leaderboard during Quiz */}
           {quizStarted && !quizEnded && leaderboard.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-8"
-            >
-              <Leaderboard 
-                entries={leaderboard} 
-                title="Live Leaderboard"
-                showRanks={true}
-                maxEntries={5}
-              />
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-8">
+              <Leaderboard entries={leaderboard} title="Live Leaderboard" showRanks maxEntries={5} />
             </motion.div>
           )}
-
-          {/* Quiz Results */}
           {quizEnded && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-8"
-            >
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
               {!isHost && (
                 <div className="bg-gradient-to-r from-green-900 to-blue-900 rounded-lg p-6 border border-green-500 text-center">
                   <h2 className="text-3xl font-bold text-green-400 mb-4">Quiz Complete!</h2>
@@ -445,21 +395,11 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                   </div>
                 </div>
               )}
-
-              <Leaderboard 
-                entries={leaderboard} 
-                title="Final Results"
-                showRanks={true}
-              />
-
+              <Leaderboard entries={leaderboard} title="Final Results" showRanks />
               <div className="text-center space-y-4">
-                <NeonButton
-                  onClick={() => router.push("/dashboard")}
-                  className="px-8 py-3"
-                >
+                <NeonButton onClick={() => router.push("/dashboard")} className="px-8 py-3">
                   Back to Dashboard
                 </NeonButton>
-                
                 {isHost && (
                   <button
                     onClick={() => window.location.reload()}

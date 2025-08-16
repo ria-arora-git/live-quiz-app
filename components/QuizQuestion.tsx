@@ -12,7 +12,7 @@ interface Question {
 
 interface QuizQuestionProps {
   question: Question;
-  onAnswer: (selectedOption: string, timeLeft: number) => void;
+  onAnswer: (selectedOption: string, timeLeft: number) => Promise<void> | void;
   disabled?: boolean;
   timeLeft?: number;
 }
@@ -27,7 +27,6 @@ export default function QuizQuestion({
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Reset when question changes
   useEffect(() => {
     setSelected(null);
     setSubmitted(false);
@@ -41,7 +40,6 @@ export default function QuizQuestion({
 
   const handleSubmit = async () => {
     if (!selected || disabled || submitted || isSubmitting) return;
-    
     setIsSubmitting(true);
     try {
       await onAnswer(selected, timeLeft);
@@ -52,11 +50,12 @@ export default function QuizQuestion({
     }
   };
 
-  // Auto-submit when time runs out
+  // Auto-submit when time runs out if an option is selected and not submitted yet
   useEffect(() => {
     if (timeLeft <= 0 && selected && !submitted && !isSubmitting) {
       handleSubmit();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft, selected, submitted, isSubmitting]);
 
   return (
@@ -82,6 +81,7 @@ export default function QuizQuestion({
             whileTap={!disabled && !submitted && !isSubmitting ? { scale: 0.98 } : {}}
             onClick={() => handleOptionSelect(option)}
             disabled={disabled || submitted || isSubmitting}
+            type="button"
             className={`
               relative p-4 rounded-lg border-2 transition-all duration-200 font-medium text-left
               ${
@@ -94,16 +94,18 @@ export default function QuizQuestion({
           >
             <div className="flex items-center gap-3">
               {/* Option Letter */}
-              <div className={`
-                w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-sm
-                ${selected === option ? "border-neonPink bg-neonPink text-black" : "border-gray-500 text-gray-400"}
-              `}>
+              <div
+                className={`
+                  w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-sm
+                  ${selected === option ? "border-neonPink bg-neonPink text-black" : "border-gray-500 text-gray-400"}
+                `}
+              >
                 {String.fromCharCode(65 + index)}
               </div>
-              
+
               {/* Option Text */}
               <span className="flex-1">{option}</span>
-              
+
               {/* Selection Indicator */}
               {selected === option && (
                 <motion.div
@@ -134,14 +136,15 @@ export default function QuizQuestion({
                 : "bg-gray-600 text-gray-400 cursor-not-allowed"
             }
           `}
+          type="button"
         >
           {isSubmitting ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 justify-center">
               <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
               Submitting...
             </div>
           ) : submitted ? (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 justify-center">
               <span>✓</span>
               Answer Submitted!
             </div>
@@ -173,9 +176,7 @@ export default function QuizQuestion({
           className="text-center mt-4"
         >
           <div className="bg-red-900 bg-opacity-50 rounded-lg p-3 border border-red-600">
-            <p className="text-red-400 font-medium">
-              ⚠️ Only {timeLeft} seconds left!
-            </p>
+            <p className="text-red-400 font-medium">⚠️ Only {timeLeft} seconds left!</p>
           </div>
         </motion.div>
       )}
@@ -187,9 +188,7 @@ export default function QuizQuestion({
           className="text-center mt-4"
         >
           <div className="bg-yellow-900 bg-opacity-50 rounded-lg p-3 border border-yellow-600">
-            <p className="text-yellow-400 font-medium">
-              💡 Select an answer quickly!
-            </p>
+            <p className="text-yellow-400 font-medium">💡 Select an answer quickly!</p>
           </div>
         </motion.div>
       )}
