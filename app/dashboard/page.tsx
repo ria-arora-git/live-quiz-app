@@ -44,14 +44,21 @@ export default function Dashboard() {
       
       const data = await res.json();
       
-      // Ensure rooms is always an array
-      const validRooms = Array.isArray(data?.rooms) ? data.rooms : [];
+      // FIXED: Ensure rooms is always an array with proper null/undefined checks
+      let validRooms: Room[] = [];
+      if (data && typeof data === 'object') {
+        if (Array.isArray(data.rooms)) {
+          validRooms = data.rooms.filter(room => room && typeof room === 'object');
+        } else if (Array.isArray(data)) {
+          validRooms = data.filter(room => room && typeof room === 'object');
+        }
+      }
       setRooms(validRooms);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to load rooms";
       console.error("Load rooms error:", err);
       setError(errorMessage);
-      setRooms([]); // Always ensure it's an array
+      setRooms([]); // Always ensure it's an empty array on error
     } finally {
       setLoading(false);
     }
@@ -180,8 +187,11 @@ export default function Dashboard() {
         throw new Error(errorData.error || "Failed to delete room");
       }
 
-      // Remove from local state
-      setRooms(prev => (Array.isArray(prev) ? prev : []).filter(room => room?.id !== roomId));
+      // Remove from local state safely
+      setRooms(prev => {
+        if (!Array.isArray(prev)) return [];
+        return prev.filter(room => room?.id !== roomId);
+      });
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to delete room";
       setError(errorMessage);
@@ -229,8 +239,8 @@ export default function Dashboard() {
     return null;
   }
 
-  // Ensure rooms is always an array
-  const safeRooms = Array.isArray(rooms) ? rooms : [];
+  // FIXED: Always ensure rooms is a safe array with proper checks
+  const safeRooms = Array.isArray(rooms) ? rooms.filter(room => room && typeof room === 'object') : [];
   const roomsLength = safeRooms.length;
   const userName = user?.firstName || user?.fullName || "User";
 
@@ -332,7 +342,9 @@ export default function Dashboard() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {safeRooms.map((room) => {
-                // Safely handle room data with fallbacks
+                // FIXED: Safely handle room data with proper null checks
+                if (!room || typeof room !== 'object') return null;
+                
                 const {
                   id = "",
                   name = "Unnamed Room",
@@ -341,7 +353,9 @@ export default function Dashboard() {
                   timePerQuestion = 30,
                   createdAt = "",
                   isActive = true
-                } = room || {};
+                } = room;
+                
+                if (!id) return null; // Skip rooms without valid IDs
                 
                 const formattedDate = createdAt 
                   ? new Date(createdAt).toLocaleDateString() 
@@ -349,7 +363,7 @@ export default function Dashboard() {
                 
                 return (
                   <motion.div
-                    key={id || Math.random()}
+                    key={id}
                     initial={{ opacity: 0, scale: 0.9 }}
                     animate={{ opacity: 1, scale: 1 }}
                     whileHover={{ scale: 1.02 }}

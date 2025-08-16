@@ -64,9 +64,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
   const [timeLeft, setTimeLeft] = useState<number>(0);
-  const [questionStartTime, setQuestionStartTime] = useState<number | null>(
-    null
-  );
+  const [questionStartTime, setQuestionStartTime] = useState<number | null>(null);
   const [hasAnswered, setHasAnswered] = useState<boolean>(false);
   const [showCorrectAnswer, setShowCorrectAnswer] = useState<boolean>(false);
 
@@ -79,7 +77,9 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
     {
       onParticipantsUpdate: (updated: any[]) => {
         console.log("👥 Participants updated:", updated);
-        setParticipants(Array.isArray(updated) ? updated : []);
+        // FIXED: Always ensure it's a safe array
+        const safeParticipants = Array.isArray(updated) ? updated.filter(p => p && typeof p === 'object') : [];
+        setParticipants(safeParticipants);
       },
 
       onQuizStart: (data: any) => {
@@ -130,15 +130,19 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
         setQuizEnded(true);
         setQuizStarted(false);
 
-        const finalLeaderboard = Array.isArray(payload?.leaderboard)
-          ? payload.leaderboard
-          : [];
+        // FIXED: Safe handling of leaderboard and userStats
+        let finalLeaderboard: LeaderboardEntry[] = [];
+        if (payload?.leaderboard && Array.isArray(payload.leaderboard)) {
+          finalLeaderboard = payload.leaderboard.filter(entry => entry && typeof entry === 'object');
+        }
         setLeaderboard(finalLeaderboard);
 
-        // Update final user score
-
-        if (user?.id && payload?.userStats?.[user.id]) {
-          setUserScore(payload.userStats[user.id].score || 0);
+        // FIXED: Safe handling of userStats with proper checks
+        if (user?.id && payload?.userStats && typeof payload.userStats === 'object') {
+          const userStat = payload.userStats[user.id];
+          if (userStat && typeof userStat === 'object' && typeof userStat.score === 'number') {
+            setUserScore(userStat.score);
+          }
         }
       },
 
@@ -150,7 +154,11 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
 
       onLeaderboardUpdate: (leaderboardData: any) => {
         console.log("🏆 Leaderboard updated:", leaderboardData);
-        setLeaderboard(Array.isArray(leaderboardData) ? leaderboardData : []);
+        // FIXED: Safe leaderboard handling
+        const safeLeaderboard = Array.isArray(leaderboardData) 
+          ? leaderboardData.filter(entry => entry && typeof entry === 'object')
+          : [];
+        setLeaderboard(safeLeaderboard);
       },
 
       onError: (error: string) => {
@@ -178,10 +186,13 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       if (data?.session) {
         setSession(data.session);
 
-        // Safely set participants
-        const sessionParticipants = Array.isArray(data.session.participants)
-          ? data.session.participants
-          : [];
+        // FIXED: Safely set participants with proper array checks
+        let sessionParticipants: any[] = [];
+        if (data.session.participants) {
+          if (Array.isArray(data.session.participants)) {
+            sessionParticipants = data.session.participants.filter(p => p && typeof p === 'object');
+          }
+        }
         setParticipants(sessionParticipants);
 
         if (data.session.isActive) {
@@ -189,8 +200,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
         }
       }
     } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Unknown error loading quiz";
+      const errorMessage = err instanceof Error ? err.message : "Unknown error loading quiz";
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -207,15 +217,9 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
 
   const handleAnswerSubmit = useCallback(
     async (selectedOption: string, currentTimeLeft: number) => {
-      if (
-        !session ||
-        !currentQuestion ||
-        quizEnded ||
-        isHost ||
-        hasAnswered ||
-        !socket
-      )
+      if (!session || !currentQuestion || quizEnded || isHost || hasAnswered || !socket) {
         return;
+      }
 
       try {
         // Submit via API first
@@ -248,16 +252,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
         console.error("Error submitting answer:", error);
       }
     },
-    [
-      session,
-      currentQuestion,
-      quizEnded,
-      isHost,
-      hasAnswered,
-      socket,
-      roomId,
-      user?.id,
-    ]
+    [session, currentQuestion, quizEnded, isHost, hasAnswered, socket, roomId, user?.id]
   );
 
   const handleStartQuiz = useCallback(async () => {
@@ -274,9 +269,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       });
 
       if (!res.ok) {
-        const errorData = await res
-          .json()
-          .catch(() => ({ error: "Failed to start quiz" }));
+        const errorData = await res.json().catch(() => ({ error: "Failed to start quiz" }));
         throw new Error(errorData.error || "Failed to start quiz");
       }
 
@@ -290,15 +283,13 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
         });
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to start quiz";
+      const errorMessage = error instanceof Error ? error.message : "Failed to start quiz";
       setError(errorMessage);
     }
   }, [session, roomId, socket, isHost]);
 
   const handleNextQuestion = useCallback(() => {
     if (!socket || !isHost) return;
-
     socket.nextQuestion({ roomId });
   }, [socket, roomId, isHost]);
 
@@ -326,17 +317,11 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
 
   // Timer effect
   useEffect(() => {
-    if (!quizStarted || quizEnded || timeLeft <= 0 || !questionStartTime)
-      return;
+    if (!quizStarted || quizEnded || timeLeft <= 0 || !questionStartTime) return;
 
     const timer = setInterval(() => {
-      const elapsed = Math.floor(
-        (Date.now() - (questionStartTime ?? 0)) / 1000
-      );
-      const remaining = Math.max(
-        0,
-        (session?.room.timePerQuestion ?? 30) - elapsed
-      );
+      const elapsed = Math.floor((Date.now() - (questionStartTime ?? 0)) / 1000);
+      const remaining = Math.max(0, (session?.room.timePerQuestion ?? 30) - elapsed);
       setTimeLeft(remaining);
 
       if (remaining <= 0) {
@@ -346,12 +331,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [
-    quizStarted,
-    quizEnded,
-    questionStartTime,
-    session?.room.timePerQuestion,
-  ]);
+  }, [quizStarted, quizEnded, questionStartTime, session?.room.timePerQuestion]);
 
   if (loading) return <LoadingSpinner />;
 
@@ -360,9 +340,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
       <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white flex items-center justify-center">
         <div className="text-center max-w-md">
           <div className="text-6xl mb-6">⚠️</div>
-          <h2 className="text-2xl font-bold text-yellow-400 mb-4">
-            Quiz Not Available
-          </h2>
+          <h2 className="text-2xl font-bold text-yellow-400 mb-4">Quiz Not Available</h2>
           <p className="text-gray-400 mb-6">{error}</p>
           <NeonButton onClick={() => router.push("/dashboard")}>
             Back to Dashboard
@@ -380,8 +358,16 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
     );
   }
 
-  const safeParticipants = Array.isArray(participants) ? participants : [];
-  const safeLeaderboard = Array.isArray(leaderboard) ? leaderboard : [];
+  // FIXED: Always ensure arrays are safe with proper filtering
+  const safeParticipants = Array.isArray(participants) 
+    ? participants.filter(p => p && typeof p === 'object')
+    : [];
+  const safeLeaderboard = Array.isArray(leaderboard)
+    ? leaderboard.filter(entry => entry && typeof entry === 'object')
+    : [];
+    
+  const participantsLength = safeParticipants.length;
+  const leaderboardLength = safeLeaderboard.length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black text-white">
@@ -399,16 +385,14 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
               </h1>
               <div className="flex items-center gap-4 text-sm text-gray-300">
                 <span>Room: {session.room?.code || "N/A"}</span>
-                <span>Participants: {safeParticipants.length}</span>
+                <span>Participants: {participantsLength}</span>
                 {quizStarted && currentQuestion && (
                   <span>
                     Question {(currentQuestion.index ?? 0) + 1} of{" "}
                     {currentQuestion.total ?? 0}
                   </span>
                 )}
-                {quizEnded && (
-                  <span className="text-yellow-400">Quiz Completed</span>
-                )}
+                {quizEnded && <span className="text-yellow-400">Quiz Completed</span>}
                 {socket && (
                   <span
                     className={`text-xs ${
@@ -422,9 +406,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
             </div>
             {!isHost && !quizEnded && (
               <div className="bg-black bg-opacity-30 rounded-lg px-4 py-2">
-                <span className="text-neonCyan font-bold text-xl">
-                  {userScore}
-                </span>
+                <span className="text-neonCyan font-bold text-xl">{userScore}</span>
                 <span className="text-gray-400 ml-2">points</span>
               </div>
             )}
@@ -441,12 +423,9 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
             >
               {isHost ? (
                 <div>
-                  <h2 className="text-3xl font-bold text-neonPink mb-4">
-                    Ready to Start?
-                  </h2>
+                  <h2 className="text-3xl font-bold text-neonPink mb-4">Ready to Start?</h2>
                   <p className="text-gray-400 mb-6">
-                    {safeParticipants.length} participant(s) joined. Click start
-                    when ready.
+                    {participantsLength} participant(s) joined. Click start when ready.
                   </p>
                   <div className="space-y-4">
                     <NeonButton
@@ -455,10 +434,9 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                     >
                       Start Quiz
                     </NeonButton>
-                    {safeParticipants.length === 0 && (
+                    {participantsLength === 0 && (
                       <p className="text-yellow-400 text-sm">
-                        💡 Share room code {session.room?.code} to invite
-                        participants
+                        💡 Share room code {session.room?.code} to invite participants
                       </p>
                     )}
                   </div>
@@ -466,9 +444,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
               ) : (
                 <div>
                   <div className="animate-pulse text-6xl mb-6">⏳</div>
-                  <h2 className="text-3xl font-bold text-neonCyan mb-4">
-                    Get Ready!
-                  </h2>
+                  <h2 className="text-3xl font-bold text-neonCyan mb-4">Get Ready!</h2>
                   <p className="text-gray-400">
                     Waiting for the host to start the quiz...
                   </p>
@@ -512,13 +488,9 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
                 {isHost && (
                   <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
                     <div className="text-center mb-6">
-                      <h3 className="text-2xl font-bold text-neonPink mb-4">
-                        Current Question
-                      </h3>
+                      <h3 className="text-2xl font-bold text-neonPink mb-4">Current Question</h3>
                       <div className="bg-gray-900 rounded-lg p-4 mb-4">
-                        <p className="text-lg font-medium mb-4">
-                          {currentQuestion.text}
-                        </p>
+                        <p className="text-lg font-medium mb-4">{currentQuestion.text}</p>
                         <div className="grid grid-cols-2 gap-2">
                           {Array.isArray(currentQuestion.options) &&
                             currentQuestion.options.map((option, index) => (
@@ -553,7 +525,7 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
           )}
 
           {/* Live Leaderboard */}
-          {quizStarted && !quizEnded && safeLeaderboard.length > 0 && (
+          {quizStarted && !quizEnded && leaderboardLength > 0 && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -577,22 +549,16 @@ export default function QuizPage({ params }: { params: { roomId: string } }) {
             >
               {!isHost && (
                 <div className="bg-gradient-to-r from-green-900 to-blue-900 rounded-lg p-6 border border-green-500 text-center">
-                  <h2 className="text-3xl font-bold text-green-400 mb-4">
-                    Quiz Complete!
-                  </h2>
+                  <h2 className="text-3xl font-bold text-green-400 mb-4">Quiz Complete!</h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <div className="text-3xl font-bold text-neonCyan">
-                        {userScore}
-                      </div>
+                      <div className="text-3xl font-bold text-neonCyan">{userScore}</div>
                       <div className="text-gray-300">Total Points</div>
                     </div>
                     <div>
                       <div className="text-3xl font-bold text-yellow-400">
                         {currentQuestion?.total
-                          ? Math.round(
-                              (userScore / (currentQuestion.total * 100)) * 100
-                            )
+                          ? Math.round((userScore / (currentQuestion.total * 100)) * 100)
                           : 0}
                         %
                       </div>

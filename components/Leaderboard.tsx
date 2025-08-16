@@ -24,13 +24,43 @@ export default function Leaderboard({
   showRanks = true,
   maxEntries = 10,
 }: LeaderboardProps) {
-  // Safely handle entries array
-  const safeEntries = Array.isArray(entries) ? entries : [];
+  // FIXED: Comprehensive array safety checks
+  const validateEntry = (entry: any): entry is LeaderboardEntry => {
+    return (
+      entry &&
+      typeof entry === 'object' &&
+      typeof entry.userId === 'string' &&
+      entry.userId.length > 0 &&
+      typeof entry.name === 'string' &&
+      typeof entry.score === 'number'
+    );
+  };
+
+  // FIXED: Safe array handling with proper filtering and validation
+  const safeEntries = (() => {
+    // First check if entries is actually an array
+    if (!Array.isArray(entries)) {
+      console.warn("Leaderboard: entries is not an array:", typeof entries, entries);
+      return [];
+    }
+
+    // Filter and validate each entry
+    const validEntries = entries.filter(validateEntry);
+    
+    if (validEntries.length !== entries.length) {
+      console.warn("Leaderboard: Some entries were invalid and filtered out", {
+        original: entries.length,
+        valid: validEntries.length
+      });
+    }
+
+    return validEntries;
+  })();
   
+  // FIXED: Safe sorting and slicing operations
   const sortedEntries = safeEntries
-    .filter(entry => entry && typeof entry === 'object')
-    .sort((a, b) => (b?.score ?? 0) - (a?.score ?? 0))
-    .slice(0, maxEntries);
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, Math.max(1, maxEntries)); // Ensure maxEntries is at least 1
 
   const getRankEmoji = (rank: number) => {
     switch (rank) {
@@ -77,22 +107,28 @@ export default function Leaderboard({
       ) : (
         <div className="space-y-3">
           {sortedEntries.map((entry, index) => {
-            // Safely extract entry data with fallbacks
+            // FIXED: Extra safety check for each entry during render
+            if (!validateEntry(entry)) {
+              console.warn("Invalid entry during render:", entry);
+              return null;
+            }
+
             const {
-              userId = "",
-              name = "Anonymous",
-              score = 0,
+              userId,
+              name,
+              score,
               dailyScore,
               allTimeScore
-            } = entry || {};
+            } = entry;
             
             const rank = index + 1;
             const displayName = name || "Anonymous";
-            const initial = displayName.charAt(0).toUpperCase();
+            const initial = displayName.charAt(0).toUpperCase() || "?";
+            const safeScore = typeof score === 'number' ? score : 0;
             
             return (
               <motion.div
-                key={userId || `entry-${index}`}
+                key={userId}
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: index * 0.1 }}
@@ -120,15 +156,15 @@ export default function Leaderboard({
                     <p className="font-bold text-white text-lg">
                       {displayName}
                     </p>
-                    {(dailyScore !== undefined || allTimeScore !== undefined) && (
+                    {(typeof dailyScore === 'number' || typeof allTimeScore === 'number') && (
                       <p className="text-sm text-gray-400">
-                        {dailyScore !== undefined && (
+                        {typeof dailyScore === 'number' && (
                           <span>Daily: {dailyScore}</span>
                         )}
-                        {dailyScore !== undefined && allTimeScore !== undefined && (
+                        {typeof dailyScore === 'number' && typeof allTimeScore === 'number' && (
                           <span className="mx-1">•</span>
                         )}
-                        {allTimeScore !== undefined && (
+                        {typeof allTimeScore === 'number' && (
                           <span>All-time: {allTimeScore}</span>
                         )}
                       </p>
@@ -139,7 +175,7 @@ export default function Leaderboard({
                 {/* Score */}
                 <div className="text-right">
                   <div className="text-2xl font-bold text-neonCyan">
-                    {score.toLocaleString()}
+                    {safeScore.toLocaleString()}
                   </div>
                   <div className="text-sm text-gray-400">points</div>
                 </div>
@@ -157,7 +193,7 @@ export default function Leaderboard({
                 )}
               </motion.div>
             );
-          })}
+          }).filter(Boolean)} {/* Filter out any null entries */}
         </div>
       )}
 
@@ -168,11 +204,10 @@ export default function Leaderboard({
         </div>
       )}
 
-      {/* Empty state for specific conditions */}
-      {safeEntries.length > 0 && sortedEntries.length === 0 && (
-        <div className="text-center py-8">
-          <div className="text-4xl mb-4 opacity-50">⚠️</div>
-          <p className="text-gray-400">Unable to display scores</p>
+      {/* Debug info in development */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="text-xs text-gray-600 mt-4 text-center">
+          Debug: {safeEntries.length} valid entries from {Array.isArray(entries) ? entries.length : 'invalid'} total
         </div>
       )}
     </div>
